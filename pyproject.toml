@@ -1,0 +1,11 @@
+[project]
+name = "ticket-classifier"
+version = "0.1.0"
+description = "IT Service Ticket Classification with justification generation"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "jupyter>=1.1.1",
+    "notebook>=7.5.2",
+    "pandas>=2.3.3",
+]
