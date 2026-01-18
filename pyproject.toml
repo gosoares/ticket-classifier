@@ -8,8 +8,11 @@ dependencies = [
     "jupyter>=1.1.1",
     "notebook>=7.5.2",
     "numpy>=2.4.1",
+    "openai>=2.15.0",
     "pandas>=2.3.3",
     "plotly>=6.5.2",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.1",
     "scikit-learn>=1.8.0",
     "sentence-transformers>=5.2.0",
 ]
