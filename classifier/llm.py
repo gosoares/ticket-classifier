@@ -7,12 +7,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 from classifier.config import LLM_MODEL
-from classifier.prompts import (
-    SYSTEM_PROMPT,
-    USER_PROMPT,
-    format_reference_tickets,
-    format_similar_tickets,
-)
+from classifier.prompts import build_system_prompt, build_user_prompt
 
 load_dotenv()
 
@@ -42,8 +37,8 @@ class TicketClassifier:
         self,
         ticket: str,
         similar_tickets: list[dict],
-        reference_tickets: dict[str, dict],
         classes: list[str],
+        reference_tickets: dict[str, dict] | None = None,
     ) -> ClassificationResult:
         """
         Classify a ticket using LLM.
@@ -51,23 +46,14 @@ class TicketClassifier:
         Args:
             ticket: The ticket text to classify
             similar_tickets: List of similar tickets from retriever
-            reference_tickets: Dict of representative tickets per class
             classes: List of valid class names
+            reference_tickets: Dict of representative tickets per class (optional)
 
         Returns:
             ClassificationResult with classe and justificativa
         """
-        # Determine which classes are already represented in similar tickets
-        similar_classes = {t["class"] for t in similar_tickets}
-
-        system = SYSTEM_PROMPT.format(classes="\n".join(f"- {c}" for c in classes))
-        user = USER_PROMPT.format(
-            ticket=ticket,
-            similar_tickets=format_similar_tickets(similar_tickets),
-            reference_tickets=format_reference_tickets(
-                reference_tickets, exclude_classes=similar_classes
-            ),
-        )
+        system = build_system_prompt(classes)
+        user = build_user_prompt(ticket, similar_tickets, reference_tickets)
 
         response = self.client.chat.completions.create(
             model=self.model,

@@ -12,4 +12,4 @@ TEST_SIZE = 200  # Tickets de teste
 RANDOM_STATE = 123  # Seed para reprodutibilidade
 
 # LLM
-LLM_MODEL = "google/gemini-2.0-flash-exp:free"
+LLM_MODEL = "xiaomi/mimo-v2-flash:free"
