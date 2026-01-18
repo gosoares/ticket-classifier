@@ -4,13 +4,13 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
+from classifier.config import EMBEDDING_MODEL
 
 
 class TicketRetriever:
     """Retrieves similar tickets using semantic search."""
 
-    def __init__(self, model_name: str = DEFAULT_MODEL):
+    def __init__(self, model_name: str = EMBEDDING_MODEL):
         self.model = SentenceTransformer(model_name)
         self.embeddings: np.ndarray | None = None
         self.tickets: pd.DataFrame | None = None
@@ -58,10 +58,52 @@ class TicketRetriever:
 
         results = []
         for idx in top_k_idx:
-            results.append({
-                "text": self.tickets.iloc[idx]["Document"],
-                "class": self.tickets.iloc[idx]["Topic_group"],
-                "score": float(scores[idx]),
-            })
+            results.append(
+                {
+                    "text": self.tickets.iloc[idx]["Document"],
+                    "class": self.tickets.iloc[idx]["Topic_group"],
+                    "score": float(scores[idx]),
+                }
+            )
 
         return results
+
+    def compute_representatives(self) -> dict[str, dict]:
+        """
+        Compute representative ticket for each class (closest to centroid).
+
+        The centroid is the mean of all embeddings for a class.
+        The representative is the ticket closest to this centroid.
+
+        Returns:
+            Dict mapping class name to {'text', 'class', 'score'}
+        """
+        if self.embeddings is None or self.tickets is None:
+            raise ValueError("Index not built. Call index() first.")
+
+        representatives = {}
+
+        for class_name in self.tickets["Topic_group"].unique():
+            # Get mask for this class
+            mask = (self.tickets["Topic_group"] == class_name).values
+            class_embeddings = self.embeddings[mask]
+
+            # Compute centroid (mean of embeddings, normalized)
+            centroid = class_embeddings.mean(axis=0)
+            centroid = centroid / np.linalg.norm(centroid)
+
+            # Find ticket closest to centroid
+            scores = class_embeddings @ centroid
+            best_local_idx = int(scores.argmax())
+
+            # Map back to original dataframe index
+            original_indices = np.where(mask)[0]
+            original_idx = original_indices[best_local_idx]
+
+            representatives[class_name] = {
+                "text": self.tickets.iloc[original_idx]["Document"],
+                "class": class_name,
+                "score": float(scores[best_local_idx]),
+            }
+
+        return representatives

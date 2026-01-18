@@ -5,6 +5,8 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+from classifier.config import RANDOM_STATE, TEST_SIZE
+
 DATASET_PATH = Path(__file__).parent.parent / "dataset.csv"
 
 
@@ -18,7 +20,7 @@ def load_dataset(path: Path = DATASET_PATH) -> tuple[pd.DataFrame, list[str]]:
 def stratified_sample(
     df: pd.DataFrame,
     n: int,
-    random_state: int = 123,
+    random_state: int = RANDOM_STATE,
 ) -> pd.DataFrame:
     """
     Create a stratified sample from the dataset.
@@ -47,8 +49,8 @@ def stratified_sample(
 
 def train_test_split_stratified(
     df: pd.DataFrame,
-    test_size: int = 200,
-    random_state: int = 123,
+    test_size: int = TEST_SIZE,
+    random_state: int = RANDOM_STATE,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split dataset into train and test sets with stratification.
