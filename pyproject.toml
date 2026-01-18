@@ -8,4 +8,5 @@ dependencies = [
     "jupyter>=1.1.1",
     "notebook>=7.5.2",
     "pandas>=2.3.3",
+    "plotly>=6.5.2",
 ]
