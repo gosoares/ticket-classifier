@@ -9,4 +9,11 @@ dependencies = [
     "notebook>=7.5.2",
     "pandas>=2.3.3",
     "plotly>=6.5.2",
+    "scikit-learn>=1.8.0",
 ]
+
+[tool.setuptools]
+packages = ["classifier"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["classifier"]
