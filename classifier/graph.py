@@ -6,8 +6,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from classifier.config import K_SIMILAR
-from classifier.llm import ClassificationResult, TicketClassifier
+from classifier.llm import ClassificationDetails, TicketClassifier
+from classifier.logging_config import get_logger
 from classifier.rag import TicketRetriever
+
+logger = get_logger("graph")
 
 
 class PipelineState(TypedDict):
@@ -15,7 +18,7 @@ class PipelineState(TypedDict):
 
     ticket: str
     similar_tickets: list[dict]
-    result: ClassificationResult | None
+    result: ClassificationDetails | None
 
 
 def create_graph(
@@ -39,17 +42,21 @@ def create_graph(
 
     def retrieve(state: PipelineState) -> dict:
         """Retrieve similar tickets from the index."""
+        logger.debug("Retrieving similar tickets")
         similar = retriever.retrieve(state["ticket"], k=K_SIMILAR)
+        logger.debug(f"Retrieved {len(similar)} similar tickets")
         return {"similar_tickets": similar}
 
     def classify(state: PipelineState) -> dict:
         """Classify the ticket using LLM with RAG context."""
+        logger.debug("Classifying ticket with LLM")
         result = classifier.classify(
             ticket=state["ticket"],
             similar_tickets=state["similar_tickets"],
             classes=classes,
             reference_tickets=reference_tickets,
         )
+        logger.debug(f"Classification complete: {result.result.classe}")
         return {"result": result}
 
     graph = StateGraph(PipelineState)
@@ -69,7 +76,7 @@ def classify_ticket(
     classifier: TicketClassifier,
     classes: list[str],
     reference_tickets: dict[str, dict] | None = None,
-) -> ClassificationResult:
+) -> ClassificationDetails:
     """
     Classify a single ticket using the RAG pipeline.
 
@@ -81,8 +88,10 @@ def classify_ticket(
         reference_tickets: Optional dict of representative tickets per class
 
     Returns:
-        ClassificationResult with classe and justificativa
+        ClassificationDetails with result, prompts, and metadata
     """
+    logger.debug(f"Classifying ticket: {ticket[:50]}...")
     graph = create_graph(retriever, classifier, classes, reference_tickets)
     result = graph.invoke({"ticket": ticket, "similar_tickets": [], "result": None})
+    logger.debug(f"Result: {result['result'].result.classe}")
     return result["result"]

@@ -1,6 +1,122 @@
-def main():
-    print("Hello from ticket-classifier!")
+#!/usr/bin/env python
+"""CLI interface for the IT Service Ticket Classifier."""
+
+import argparse
+import sys
+
+from classifier.config import K_SIMILAR, LLM_MODEL, RANDOM_STATE, TEST_SIZE
+from classifier.runner import run_evaluation
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="IT Service Ticket Classifier - Evaluate RAG-based classification",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="dataset.csv",
+        help="Path to the CSV dataset file",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="output",
+        help="Directory for output files (logs, reports)",
+    )
+
+    parser.add_argument(
+        "--test-size",
+        type=int,
+        default=TEST_SIZE,
+        help="Number of test samples (divided equally among classes)",
+    )
+
+    parser.add_argument(
+        "--k-similar",
+        type=int,
+        default=K_SIMILAR,
+        help="Number of similar tickets to retrieve for context",
+    )
+
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=RANDOM_STATE,
+        help="Random seed for reproducibility",
+    )
+
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=LLM_MODEL,
+        help="LLM model name for OpenRouter API",
+    )
+
+    parser.add_argument(
+        "--no-references",
+        action="store_true",
+        help="Disable reference tickets (one per class) in prompts",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose logging to terminal",
+    )
+
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Main entry point for the CLI."""
+    args = parse_args()
+
+    try:
+        result = run_evaluation(
+            dataset_path=args.dataset,
+            output_dir=args.output,
+            test_size=args.test_size,
+            k_similar=args.k_similar,
+            random_state=args.random_state,
+            model=args.model,
+            use_references=not args.no_references,
+            verbose=args.verbose,
+        )
+
+        # Print summary to stdout
+        print("\n" + "=" * 60)
+        print("EVALUATION SUMMARY")
+        print("=" * 60)
+        print(f"Total tickets:  {result['total']}")
+        print(f"Correct:        {result['correct']}")
+        print(f"Wrong:          {result['wrong']}")
+        print(f"Errors:         {result['errors']}")
+
+        if result["metrics"]:
+            print(f"\nAccuracy:       {result['metrics']['accuracy']:.4f}")
+            print(f"F1 Macro:       {result['metrics']['f1_macro']:.4f}")
+
+        print("\nOutput files:")
+        print(f"  - {result['classifications_path']}")
+        print(f"  - {result['metrics_path']}")
+        print(f"  - {result['log_path']}")
+
+        return 0
+
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        return 130
+
+    except Exception as e:
+        print(f"\nError: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

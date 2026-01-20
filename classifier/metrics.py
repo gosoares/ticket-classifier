@@ -9,6 +9,10 @@ from sklearn.metrics import (
     f1_score,
 )
 
+from classifier.logging_config import get_logger
+
+logger = get_logger("metrics")
+
 
 def evaluate(
     y_true: list[str],
@@ -26,12 +30,19 @@ def evaluate(
     Returns:
         Dict with accuracy, f1_macro, confusion_matrix, and report
     """
-    return {
+    logger.info(f"Calculating metrics for {len(y_true)} predictions")
+    metrics = {
         "accuracy": accuracy_score(y_true, y_pred),
         "f1_macro": f1_score(y_true, y_pred, average="macro", zero_division=0),
         "confusion_matrix": confusion_matrix(y_true, y_pred, labels=classes),
-        "report": classification_report(y_true, y_pred, labels=classes, zero_division=0),
+        "report": classification_report(
+            y_true, y_pred, labels=classes, zero_division=0
+        ),
     }
+    logger.info(
+        f"Accuracy: {metrics['accuracy']:.4f}, F1 Macro: {metrics['f1_macro']:.4f}"
+    )
+    return metrics
 
 
 def print_report(metrics: dict, classes: list[str]) -> None:

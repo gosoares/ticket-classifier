@@ -8,7 +8,7 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 MIN_SAMPLES_PER_CLASS = 1  # Mínimo de tickets por classe no prompt
 
 # Avaliação
-TEST_SIZE = 8  # Tickets de teste
+TEST_SIZE = 200  # Tickets de teste (25 por classe × 8 classes)
 RANDOM_STATE = 123  # Seed para reprodutibilidade
 
 # LLM

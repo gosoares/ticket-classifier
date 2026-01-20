@@ -5,12 +5,16 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 
 from classifier.config import EMBEDDING_MODEL
+from classifier.logging_config import get_logger
+
+logger = get_logger("rag")
 
 
 class TicketRetriever:
     """Retrieves similar tickets using semantic search."""
 
     def __init__(self, model_name: str = EMBEDDING_MODEL):
+        logger.debug(f"Initializing TicketRetriever with model: {model_name}")
         self.model = SentenceTransformer(model_name)
         self.embeddings: np.ndarray | None = None
         self.tickets: pd.DataFrame | None = None
@@ -22,6 +26,7 @@ class TicketRetriever:
         Args:
             df: DataFrame with 'Document' and 'Topic_group' columns
         """
+        logger.info(f"Indexing {len(df):,} tickets for retrieval")
         self.tickets = df.reset_index(drop=True)
         texts = df["Document"].tolist()
         self.embeddings = self.model.encode(
@@ -31,6 +36,7 @@ class TicketRetriever:
         self.embeddings = self.embeddings / np.linalg.norm(
             self.embeddings, axis=1, keepdims=True
         )
+        logger.info("Indexing complete")
 
     def retrieve(self, query: str, k: int = 5) -> list[dict]:
         """
@@ -81,6 +87,7 @@ class TicketRetriever:
         if self.embeddings is None or self.tickets is None:
             raise ValueError("Index not built. Call index() first.")
 
+        logger.info("Computing representative tickets for each class")
         representatives = {}
 
         for class_name in self.tickets["Topic_group"].unique():
@@ -106,4 +113,5 @@ class TicketRetriever:
                 "score": float(scores[best_local_idx]),
             }
 
+        logger.info(f"Computed representatives for {len(representatives)} classes")
         return representatives

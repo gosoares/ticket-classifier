@@ -6,14 +6,20 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from classifier.config import RANDOM_STATE, TEST_SIZE
+from classifier.logging_config import get_logger
 
 DATASET_PATH = Path(__file__).parent.parent / "dataset.csv"
+
+logger = get_logger("data")
 
 
 def load_dataset(path: Path = DATASET_PATH) -> tuple[pd.DataFrame, list[str]]:
     """Load the ticket dataset from CSV."""
+    logger.info(f"Loading dataset from {path}")
     df = pd.read_csv(path)
     classes = sorted(df["Topic_group"].unique().tolist())
+    logger.info(f"Loaded {len(df):,} tickets with {len(classes)} classes")
+    logger.debug(f"Classes: {classes}")
     return df, classes
 
 
@@ -97,10 +103,16 @@ def train_test_split_balanced(
     n_classes = df["Topic_group"].nunique()
     n_per_class = test_size // n_classes
 
+    logger.info(
+        f"Splitting dataset: {n_per_class} samples per class ({n_classes} classes)"
+    )
+
     # Sample n_per_class from each class
     test_df = df.groupby("Topic_group", group_keys=False).sample(
         n=n_per_class, random_state=random_state
     )
     train_df = df.drop(test_df.index)
+
+    logger.info(f"Train: {len(train_df):,} tickets, Test: {len(test_df)} tickets")
 
     return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
