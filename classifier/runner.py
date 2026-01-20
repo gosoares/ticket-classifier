@@ -9,7 +9,7 @@ from tqdm import tqdm
 from classifier.config import K_SIMILAR, LLM_MODEL, RANDOM_STATE, TEST_SIZE
 from classifier.data import load_dataset, train_test_split_balanced
 from classifier.graph import classify_ticket
-from classifier.llm import ClassificationError, TicketClassifier
+from classifier.llm import ClassificationError, TicketClassifier, TokenUsage
 from classifier.logging_config import get_logger, setup_logging
 from classifier.metrics import evaluate
 from classifier.rag import TicketRetriever
@@ -94,6 +94,7 @@ def run_evaluation(
     errors = []
     y_true = []
     y_pred = []
+    total_tokens = TokenUsage(0, 0, 0)
 
     pbar = tqdm(test_df.iterrows(), total=len(test_df), desc="Classifying")
     for _, row in pbar:
@@ -112,6 +113,9 @@ def run_evaluation(
             y_true.append(true_label)
             y_pred.append(details.result.classe)
 
+            # Accumulate token usage
+            total_tokens = total_tokens + details.token_usage
+
             # Update progress bar with last result
             is_correct = true_label == details.result.classe
             pbar.set_postfix(pred=details.result.classe, ok=is_correct)
@@ -127,6 +131,11 @@ def run_evaluation(
                     "user_prompt": details.user_prompt,
                     "similar_tickets": details.similar_tickets,
                     "retries": details.retries,
+                    "token_usage": {
+                        "prompt_tokens": details.token_usage.prompt_tokens,
+                        "completion_tokens": details.token_usage.completion_tokens,
+                        "total_tokens": details.token_usage.total_tokens,
+                    },
                 }
             )
 
@@ -142,6 +151,10 @@ def run_evaluation(
             )
 
     logger.info(f"Classified: {len(classifications)}, Errors: {len(errors)}")
+    logger.info(
+        f"Total tokens: {total_tokens.total_tokens} "
+        f"(prompt: {total_tokens.prompt_tokens}, completion: {total_tokens.completion_tokens})"
+    )
 
     # Step 4: Calculate metrics
     logger.info("-" * 60)
@@ -175,6 +188,11 @@ def run_evaluation(
             "classified": len(classifications),
             "errors": len(errors),
             "correct": sum(1 for c in classifications if c["correct"]),
+            "token_usage": {
+                "prompt_tokens": total_tokens.prompt_tokens,
+                "completion_tokens": total_tokens.completion_tokens,
+                "total_tokens": total_tokens.total_tokens,
+            },
         },
         "classifications": classifications,
         "errors": errors,
@@ -214,6 +232,10 @@ def run_evaluation(
     n_correct = sum(1 for c in classifications if c["correct"])
     n_wrong = len(classifications) - n_correct
     logger.info(f"Correct: {n_correct}, Wrong: {n_wrong}, Errors: {len(errors)}")
+    logger.info(
+        f"Total tokens used: {total_tokens.total_tokens:,} "
+        f"(prompt: {total_tokens.prompt_tokens:,}, completion: {total_tokens.completion_tokens:,})"
+    )
 
     if metrics:
         logger.info(f"Accuracy: {metrics['accuracy']:.4f}")
@@ -242,4 +264,9 @@ def run_evaluation(
         "correct": n_correct,
         "wrong": n_wrong,
         "errors": len(errors),
+        "token_usage": {
+            "prompt_tokens": total_tokens.prompt_tokens,
+            "completion_tokens": total_tokens.completion_tokens,
+            "total_tokens": total_tokens.total_tokens,
+        },
     }

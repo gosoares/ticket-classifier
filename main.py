@@ -102,6 +102,13 @@ def main() -> int:
             print(f"\nAccuracy:       {result['metrics']['accuracy']:.4f}")
             print(f"F1 Macro:       {result['metrics']['f1_macro']:.4f}")
 
+        if result.get("token_usage"):
+            tokens = result["token_usage"]
+            print("\nToken usage:")
+            print(f"  Prompt:       {tokens['prompt_tokens']:,}")
+            print(f"  Completion:   {tokens['completion_tokens']:,}")
+            print(f"  Total:        {tokens['total_tokens']:,}")
+
         print("\nOutput files:")
         print(f"  - {result['classifications_path']}")
         print(f"  - {result['metrics_path']}")

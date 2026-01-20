@@ -38,6 +38,23 @@ class ClassificationResult(BaseModel):
 
 
 @dataclass
+class TokenUsage:
+    """Token usage from LLM API calls."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        """Sum token usage from multiple calls (e.g., retries)."""
+        return TokenUsage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+        )
+
+
+@dataclass
 class ClassificationDetails:
     """Complete details of a classification including prompts used."""
 
@@ -46,6 +63,7 @@ class ClassificationDetails:
     user_prompt: str
     similar_tickets: list[dict]
     retries: int
+    token_usage: TokenUsage
 
 
 class TicketClassifier:
@@ -97,6 +115,7 @@ class TicketClassifier:
 
         last_content = ""
         retries_used = 0
+        total_usage = TokenUsage(0, 0, 0)
 
         for attempt in range(max_retries + 1):
             logger.debug(f"Classification attempt {attempt + 1}/{max_retries + 1}")
@@ -114,6 +133,20 @@ class TicketClassifier:
                     raw_response=None,
                 ) from e
 
+            # Accumulate token usage
+            if response.usage:
+                call_usage = TokenUsage(
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    total_tokens=response.usage.total_tokens,
+                )
+                total_usage = total_usage + call_usage
+                logger.debug(
+                    f"Tokens used: {call_usage.total_tokens} "
+                    f"(prompt: {call_usage.prompt_tokens}, "
+                    f"completion: {call_usage.completion_tokens})"
+                )
+
             last_content = response.choices[0].message.content or ""
             logger.debug(f"LLM response: {last_content[:200]}...")
 
@@ -126,6 +159,7 @@ class TicketClassifier:
                     user_prompt=user,
                     similar_tickets=similar_tickets,
                     retries=retries_used,
+                    token_usage=total_usage,
                 )
             except ValidationError:
                 retries_used += 1
