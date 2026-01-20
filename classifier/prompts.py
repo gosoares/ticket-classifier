@@ -24,13 +24,12 @@ Responda APENAS com JSON no formato:
 A justificativa deve mencionar palavras-chave ou padrões do ticket que justificam a classificação."""
 
 
-def _format_similar_tickets(tickets: list[dict], max_chars: int = 200) -> str:
+def _format_similar_tickets(tickets: list[dict]) -> str:
     """
     Formata tickets similares para o prompt.
 
     Args:
         tickets: Lista de dicts com 'text', 'class', 'score'
-        max_chars: Máximo de caracteres por ticket
 
     Returns:
         String formatada com tickets numerados
@@ -40,18 +39,13 @@ def _format_similar_tickets(tickets: list[dict], max_chars: int = 200) -> str:
 
     lines = []
     for i, t in enumerate(tickets, 1):
-        text = t["text"][:max_chars]
-        if len(t["text"]) > max_chars:
-            text += "..."
-        lines.append(f"{i}. [{t['class']}] {text}")
+        lines.append(f"{i}. [{t['class']}] {t['text']}")
 
     return "\n".join(lines)
 
 
 def _format_reference_tickets(
-    representatives: dict[str, dict],
-    exclude_classes: set[str] | None = None,
-    max_chars: int = 150,
+    representatives: dict[str, dict], exclude_classes: set[str] | None = None
 ) -> str:
     """
     Formata tickets de referência para o prompt.
@@ -59,7 +53,6 @@ def _format_reference_tickets(
     Args:
         representatives: Dict[classe] -> {'text', 'class', 'score'}
         exclude_classes: Classes a omitir (já presentes nos similares)
-        max_chars: Máximo de caracteres por ticket
 
     Returns:
         String formatada com um exemplo de cada classe
@@ -72,10 +65,7 @@ def _format_reference_tickets(
             continue
 
         t = representatives[class_name]
-        text = t["text"][:max_chars]
-        if len(t["text"]) > max_chars:
-            text += "..."
-        lines.append(f"- [{class_name}] {text}")
+        lines.append(f"- [{class_name}] {t['text']}")
 
     return "\n".join(lines)
 
@@ -84,8 +74,6 @@ def build_user_prompt(
     ticket: str,
     similar_tickets: list[dict],
     reference_tickets: dict[str, dict] | None = None,
-    max_chars_similar: int = 200,
-    max_chars_reference: int = 150,
 ) -> str:
     """
     Gera o prompt do usuário para classificação.
@@ -97,8 +85,6 @@ def build_user_prompt(
         ticket: Texto do ticket a classificar
         similar_tickets: Lista de tickets similares do RAG
         reference_tickets: Dict de tickets representativos por classe (opcional)
-        max_chars_similar: Máximo de caracteres por ticket similar
-        max_chars_reference: Máximo de caracteres por ticket de referência
 
     Returns:
         Prompt formatado para o role "user"
@@ -109,7 +95,7 @@ def build_user_prompt(
 {ticket}
 
 ## Tickets Similares
-{_format_similar_tickets(similar_tickets, max_chars_similar)}"""
+{_format_similar_tickets(similar_tickets)}"""
 
     # Seção de referência (opcional)
     if reference_tickets:
@@ -117,9 +103,7 @@ def build_user_prompt(
         similar_classes = {t["class"] for t in similar_tickets}
 
         reference_text = _format_reference_tickets(
-            reference_tickets,
-            exclude_classes=similar_classes,
-            max_chars=max_chars_reference,
+            reference_tickets, exclude_classes=similar_classes
         )
 
         # Só adiciona a seção se houver classes não representadas
