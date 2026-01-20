@@ -1,4 +1,4 @@
-"""LLM classification module using OpenRouter."""
+"""LLM classification module using OpenAI-compatible APIs."""
 
 import os
 from dataclasses import dataclass
@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 from openai import APIError, OpenAI
 from pydantic import BaseModel, ValidationError
 
-from classifier.config import LLM_MODEL
 from classifier.logging_config import get_logger
 from classifier.prompts import build_system_prompt, build_user_prompt
 
 load_dotenv()
+
+LLM_MODEL = os.environ.get("LLM_MODEL")
 
 logger = get_logger("llm")
 
@@ -69,15 +70,21 @@ class ClassificationDetails:
 class TicketClassifier:
     """Classifies tickets using LLM with RAG context."""
 
+    model: str
+
     def __init__(
         self,
-        model: str = LLM_MODEL,
+        model: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
     ):
-        self.model = model
+        resolved_model = model or LLM_MODEL
+        if not resolved_model:
+            raise ValueError("LLM_MODEL must be set via parameter or LLM_MODEL env var")
+        self.model = resolved_model
         self.client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
+            base_url=base_url or os.environ.get("LLM_BASE_URL"),
+            api_key=api_key or os.environ.get("LLM_API_KEY"),
         )
 
     def classify(

@@ -4,7 +4,7 @@
 import argparse
 import sys
 
-from classifier.config import K_SIMILAR, LLM_MODEL, RANDOM_STATE, TEST_SIZE
+from classifier.config import K_SIMILAR, RANDOM_STATE, TEST_SIZE
 from classifier.runner import run_evaluation
 
 
@@ -53,8 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default=LLM_MODEL,
-        help="LLM model name for OpenRouter API",
+        default=None,
+        help="LLM model name (overrides LLM_MODEL env var)",
     )
 
     parser.add_argument(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from classifier.config import K_SIMILAR, LLM_MODEL, RANDOM_STATE, TEST_SIZE
+from classifier.config import K_SIMILAR, RANDOM_STATE, TEST_SIZE
 from classifier.data import load_dataset, train_test_split_balanced
 from classifier.graph import classify_ticket
 from classifier.llm import ClassificationError, TicketClassifier, TokenUsage
@@ -23,7 +23,7 @@ def run_evaluation(
     test_size: int = TEST_SIZE,
     k_similar: int = K_SIMILAR,
     random_state: int = RANDOM_STATE,
-    model: str = LLM_MODEL,
+    model: str | None = None,
     use_references: bool = True,
     verbose: bool = False,
 ) -> dict:
@@ -43,7 +43,7 @@ def run_evaluation(
         test_size: Number of test samples (divided equally among classes)
         k_similar: Number of similar tickets to retrieve
         random_state: Random seed for reproducibility
-        model: LLM model name for OpenRouter
+        model: LLM model name (from LLM_MODEL env var if not specified)
         use_references: Whether to use reference tickets in prompts
         verbose: Enable verbose logging to terminal
 
