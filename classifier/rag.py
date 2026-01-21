@@ -98,6 +98,66 @@ class TicketRetriever:
         query_emb = self.embed(query)
         return self.search(query_emb, k)
 
+    def compute_class_similarity(
+        self, query: str, target_class: str, k: int = 5
+    ) -> dict:
+        """
+        Compute similarity of a query to tickets from a specific class.
+
+        Filters the indexed dataset by target_class, then computes cosine
+        similarity between the query and those tickets.
+
+        Args:
+            query: Query text to analyze
+            target_class: Class to filter tickets by
+            k: Number of top scores to average (default: 5)
+
+        Returns:
+            Dict with:
+                - 'mean_score': Mean of top-k similarity scores
+                - 'top_scores': List of top-k scores (sorted)
+                - 'top_tickets': List of top-k ticket dicts with 'text', 'score'
+
+        Raises:
+            ValueError: If index not built (call index() first)
+        """
+        if self.embeddings is None or self.tickets is None:
+            raise ValueError("Index not built. Call index() first.")
+
+        # Embed the query
+        query_emb = self.embed(query)
+
+        # Filter by target class
+        mask = (self.tickets["Topic_group"] == target_class).values
+        class_embeddings = self.embeddings[mask]
+        class_tickets = self.tickets[mask].reset_index(drop=True)
+
+        if len(class_tickets) == 0:
+            return {
+                "mean_score": 0.0,
+                "top_scores": [],
+                "top_tickets": [],
+            }
+
+        # Compute cosine similarity
+        scores = class_embeddings @ query_emb
+
+        # Get top-k
+        top_k_idx = np.argsort(scores)[::-1][:min(k, len(scores))]
+
+        top_tickets = []
+        for idx in top_k_idx:
+            top_tickets.append({
+                "text": class_tickets.iloc[idx]["Document"],
+                "score": float(scores[idx]),
+            })
+
+        return {
+            "mean_score": float(scores[top_k_idx].mean()) if len(top_k_idx) > 0 else 0.0,
+            "top_scores": [float(scores[i]) for i in top_k_idx],
+            "top_tickets": top_tickets,
+        }
+
     def compute_representatives(self) -> dict[str, dict]:
         """
         Compute representative ticket for each class (closest to centroid).
