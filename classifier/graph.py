@@ -32,6 +32,7 @@ def create_graph(
     classes: list[str],
     reference_tickets: dict[str, dict] | None = None,
     reasoning_effort: str | None = REASONING_EFFORT,
+    k_similar: int = K_SIMILAR,
 ) -> CompiledStateGraph:
     """
     Create the classification pipeline graph.
@@ -63,7 +64,7 @@ def create_graph(
     def retrieve(state: PipelineState) -> dict:
         """Retrieve similar tickets from the index."""
         logger.debug("Retrieving similar tickets")
-        similar = retriever.search(state["embedding"], k=K_SIMILAR)
+        similar = retriever.search(state["embedding"], k=k_similar)
         logger.debug(f"Retrieved {len(similar)} similar tickets")
         return {"similar_tickets": similar}
 
@@ -87,6 +88,7 @@ def create_graph(
             system_prompt=state["system_prompt"],
             user_prompt=state["user_prompt"],
             similar_tickets=state["similar_tickets"],
+            valid_classes=classes,
             reasoning_effort=reasoning_effort,
         )
         logger.debug(f"Classification complete: {result.result.classe}")
@@ -114,6 +116,7 @@ def classify_ticket(
     classes: list[str],
     reference_tickets: dict[str, dict] | None = None,
     reasoning_effort: str | None = REASONING_EFFORT,
+    k_similar: int = K_SIMILAR,
 ) -> ClassificationDetails:
     """
     Classify a single ticket using the RAG pipeline.
@@ -131,7 +134,12 @@ def classify_ticket(
     """
     logger.debug(f"Classifying ticket: {ticket[:50]}...")
     graph = create_graph(
-        retriever, classifier, classes, reference_tickets, reasoning_effort
+        retriever,
+        classifier,
+        classes,
+        reference_tickets,
+        reasoning_effort,
+        k_similar=k_similar,
     )
     result = graph.invoke(
         {

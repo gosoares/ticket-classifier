@@ -24,6 +24,7 @@ def classify_batch(
     classifier: TicketClassifier,
     classes: list[str],
     reference_tickets: dict[str, dict] | None = None,
+    k_similar: int = K_SIMILAR,
     reasoning_effort: str | None = REASONING_EFFORT,
     show_progress: bool = True,
 ) -> tuple[list[dict], list[dict], TokenUsage]:
@@ -71,6 +72,7 @@ def classify_batch(
                 classes=classes,
                 reference_tickets=reference_tickets,
                 reasoning_effort=reasoning_effort,
+                k_similar=k_similar,
             )
 
             y_true.append(true_label)
@@ -201,6 +203,7 @@ def run_evaluation(
         classifier=classifier,
         classes=classes,
         reference_tickets=reference_tickets,
+        k_similar=k_similar,
         reasoning_effort=reasoning_effort,
         show_progress=True,
     )

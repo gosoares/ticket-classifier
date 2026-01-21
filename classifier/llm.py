@@ -20,6 +20,13 @@ RETRY_PROMPT = """Sua resposta anterior não está no formato JSON válido.
 Por favor, responda APENAS com JSON válido no formato:
 {"classe": "<categoria>", "justificativa": "<explicação>"}"""
 
+INVALID_CLASS_PROMPT_TEMPLATE = """O campo "classe" precisa ser UMA das seguintes categorias:
+{classes}
+
+Responda APENAS com JSON válido no formato:
+{{"classe": "<categoria>", "justificativa": "<explicação>"}}
+"""
+
 
 class ClassificationError(Exception):
     """Raised when classification fails after retries."""
@@ -98,6 +105,7 @@ class TicketClassifier:
         system_prompt: str,
         user_prompt: str,
         similar_tickets: list[dict],
+        valid_classes: list[str] | None = None,
         max_retries: int = 1,
         reasoning_effort: str | None = None,
     ) -> ClassificationDetails:
@@ -109,6 +117,7 @@ class TicketClassifier:
             system_prompt: Pre-built system prompt
             user_prompt: Pre-built user prompt
             similar_tickets: List of similar tickets (for result metadata)
+            valid_classes: Optional list of valid class names to enforce
             max_retries: Number of retries if JSON parsing fails
             reasoning_effort: Reasoning effort level (low/medium/high) or None to disable
 
@@ -127,6 +136,7 @@ class TicketClassifier:
         last_reasoning = None
         retries_used = 0
         total_usage = TokenUsage(0, 0, 0)
+        last_failure_reason: str | None = None
 
         for attempt in range(max_retries + 1):
             logger.debug(f"Classification attempt {attempt + 1}/{max_retries + 1}")
@@ -217,6 +227,37 @@ class TicketClassifier:
 
             try:
                 result = ClassificationResult.model_validate_json(last_content)
+                result.classe = result.classe.strip()
+
+                if valid_classes:
+                    canonical_by_lower = {c.lower(): c for c in valid_classes}
+                    canonical = canonical_by_lower.get(result.classe.lower())
+
+                    if canonical is None:
+                        retries_used += 1
+                        logger.warning(
+                            f"Invalid class '{result.classe}', retry {retries_used}"
+                        )
+                        last_failure_reason = (
+                            f"Invalid class '{result.classe}' not in allowed categories"
+                        )
+                        if attempt < max_retries:
+                            messages.append(
+                                {"role": "assistant", "content": last_content}
+                            )
+                            classes_formatted = "\n".join(f"- {c}" for c in valid_classes)
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": INVALID_CLASS_PROMPT_TEMPLATE.format(
+                                        classes=classes_formatted
+                                    ),
+                                }
+                            )
+                            continue
+                        break
+
+                    result.classe = canonical
                 logger.debug(f"Classification successful: {result.classe}")
                 return ClassificationDetails(
                     result=result,
@@ -229,17 +270,20 @@ class TicketClassifier:
                 )
             except ValidationError:
                 retries_used += 1
+                last_failure_reason = "Invalid JSON or missing required fields"
                 logger.warning(f"Invalid JSON response, retry {retries_used}")
                 if attempt < max_retries:
                     # Add assistant response and retry prompt to continue conversation
                     messages.append({"role": "assistant", "content": last_content})
                     messages.append({"role": "user", "content": RETRY_PROMPT})
+                else:
+                    break
 
         # All retries exhausted
         logger.error(f"Classification failed after {retries_used} retries")
         raise ClassificationError(
             ticket=ticket[:100],
-            reason="Invalid JSON after retries",
+            reason=last_failure_reason or "Invalid response after retries",
             raw_response=last_content,
         )
 
@@ -273,5 +317,11 @@ class TicketClassifier:
         system = build_system_prompt(classes)
         user = build_user_prompt(ticket, similar_tickets, reference_tickets)
         return self.call_llm(
-            ticket, system, user, similar_tickets, max_retries, reasoning_effort
+            ticket=ticket,
+            system_prompt=system,
+            user_prompt=user,
+            similar_tickets=similar_tickets,
+            valid_classes=classes,
+            max_retries=max_retries,
+            reasoning_effort=reasoning_effort,
         )
