@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from collections import defaultdict
 from sentence_transformers import SentenceTransformer
 
 from classifier.config import EMBEDDING_MODEL
@@ -97,6 +98,66 @@ class TicketRetriever:
         """
         query_emb = self.embed(query)
         return self.search(query_emb, k)
+
+    def weighted_vote(self, similar_tickets: list[dict]) -> dict:
+        """
+        Classify using a weighted vote over similar tickets.
+
+        Each class gets the sum of similarity scores from the retrieved tickets.
+        The predicted class is the one with the highest total score.
+
+        Args:
+            similar_tickets: List of dicts with 'class' and 'score' keys
+
+        Returns:
+            Dict with:
+                - 'predicted_class': Class with highest weighted score
+                - 'class_scores': Dict of class -> summed score (sorted desc)
+                - 'best_scores': Dict of class -> best individual score
+        """
+        if not similar_tickets:
+            raise ValueError("No similar tickets to vote on.")
+
+        class_scores: dict[str, float] = defaultdict(float)
+        best_scores: dict[str, float] = {}
+
+        for ticket in similar_tickets:
+            class_name = ticket["class"]
+            score = float(ticket["score"])
+            class_scores[class_name] += score
+            if score > best_scores.get(class_name, float("-inf")):
+                best_scores[class_name] = score
+
+        predicted_class = max(
+            class_scores,
+            key=lambda cls: (class_scores[cls], best_scores.get(cls, float("-inf"))),
+        )
+
+        sorted_scores = dict(
+            sorted(class_scores.items(), key=lambda item: item[1], reverse=True)
+        )
+
+        return {
+            "predicted_class": predicted_class,
+            "class_scores": sorted_scores,
+            "best_scores": best_scores,
+        }
+
+    def classify_weighted_vote(self, query: str, k: int = 5) -> dict:
+        """
+        Retrieve k tickets and classify using weighted vote.
+
+        Args:
+            query: Query text to classify
+            k: Number of tickets to retrieve
+
+        Returns:
+            Dict with weighted vote outputs plus 'similar_tickets'
+        """
+        similar = self.retrieve(query, k)
+        result = self.weighted_vote(similar)
+        result["similar_tickets"] = similar
+        return result
 
     def compute_class_similarity(
         self, query: str, target_class: str, k: int = 5
