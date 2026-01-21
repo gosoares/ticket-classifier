@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
-from openai import APIError, OpenAI
+from openai import APIError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 from classifier.logging_config import get_logger
@@ -85,6 +85,7 @@ class TicketClassifier:
         self.client = OpenAI(
             base_url=base_url or os.environ.get("LLM_BASE_URL"),
             api_key=api_key or os.environ.get("LLM_API_KEY"),
+            timeout=20.0,  # timeout to prevent hanging
         )
 
     def classify(
@@ -132,6 +133,13 @@ class TicketClassifier:
                     messages=messages,
                     response_format={"type": "json_object"},
                 )
+            except APITimeoutError as e:
+                logger.error("API timeout - LLM took too long to respond")
+                raise ClassificationError(
+                    ticket=ticket[:100],
+                    reason="API timeout - LLM took too long to respond",
+                    raw_response=None,
+                ) from e
             except APIError as e:
                 logger.error(f"API error: {e.message}")
                 raise ClassificationError(
