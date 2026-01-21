@@ -36,19 +36,46 @@ def evaluate(
         Dict with accuracy, f1_macro, confusion_matrix, and report
     """
     logger.info(f"Calculating metrics for {len(y_true)} predictions")
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_true, y_pred, labels=classes, zero_division=0
+    )
+    per_class = {
+        class_name: {
+            "precision": float(precision[idx]),
+            "recall": float(recall[idx]),
+            "f1": float(f1[idx]),
+            "support": int(support[idx]),
+        }
+        for idx, class_name in enumerate(classes)
+    }
+    cm = confusion_matrix(y_true, y_pred, labels=classes)
+    cm_normalized = cm.astype(float)
+    row_sums = cm_normalized.sum(axis=1, keepdims=True)
+    cm_normalized = np.divide(
+        cm_normalized,
+        row_sums,
+        out=np.zeros_like(cm_normalized),
+        where=row_sums != 0,
+    )
     metrics = {
         "accuracy": accuracy_score(y_true, y_pred),
         "f1_macro": f1_score(y_true, y_pred, average="macro", zero_division=0),
+        "f1_weighted": f1_score(
+            y_true, y_pred, average="weighted", zero_division=0
+        ),
         "cohen_kappa": cohen_kappa_score(y_true, y_pred),
         "mcc": matthews_corrcoef(y_true, y_pred),
-        "confusion_matrix": confusion_matrix(y_true, y_pred, labels=classes),
+        "confusion_matrix": cm,
+        "confusion_matrix_normalized": cm_normalized,
+        "per_class": per_class,
         "report": classification_report(
             y_true, y_pred, labels=classes, zero_division=0
         ),
     }
     logger.info(
         f"Accuracy: {metrics['accuracy']:.4f}, F1 Macro: {metrics['f1_macro']:.4f}, "
-        f"Kappa: {metrics['cohen_kappa']:.4f}, MCC: {metrics['mcc']:.4f}"
+        f"F1 Weighted: {metrics['f1_weighted']:.4f}, Kappa: {metrics['cohen_kappa']:.4f}, "
+        f"MCC: {metrics['mcc']:.4f}"
     )
     return metrics
 
@@ -67,6 +94,7 @@ def print_report(metrics: dict, classes: list[str]) -> None:
 
     print(f"\nAccuracy:      {metrics['accuracy']:.4f}")
     print(f"F1 Macro:      {metrics['f1_macro']:.4f}")
+    print(f"F1 Weighted:   {metrics['f1_weighted']:.4f}")
     print(f"Cohen's Kappa: {metrics['cohen_kappa']:.4f}")
     print(f"MCC:           {metrics['mcc']:.4f}")
 

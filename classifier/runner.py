@@ -7,10 +7,26 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, TEST_SIZE
+from classifier.config import (
+    EMBEDDING_MODEL,
+    K_SIMILAR,
+    RANDOM_STATE,
+    REASONING_EFFORT,
+    TEST_SIZE,
+)
+from classifier.conclusion import (
+    build_conclusion_payload,
+    build_conclusion_system_prompt,
+    build_conclusion_user_prompt,
+)
 from classifier.data import load_dataset, train_test_split_balanced
 from classifier.graph import classify_ticket
-from classifier.llm import ClassificationError, TicketClassifier, TokenUsage
+from classifier.llm import (
+    ClassificationError,
+    ConclusionError,
+    TicketClassifier,
+    TokenUsage,
+)
 from classifier.logging_config import get_logger, setup_logging
 from classifier.metrics import evaluate
 from classifier.rag import TicketRetriever
@@ -266,6 +282,8 @@ def run_evaluation(
 
     # Save metrics report
     metrics_path = output_path / "metrics.json"
+    cm = metrics.get("confusion_matrix") if metrics else None
+    cm_normalized = metrics.get("confusion_matrix_normalized") if metrics else None
     metrics_report = {
         "metadata": {
             "timestamp": timestamp,
@@ -276,9 +294,14 @@ def run_evaluation(
         "metrics": {
             "accuracy": metrics.get("accuracy"),
             "f1_macro": metrics.get("f1_macro"),
-            "confusion_matrix": metrics.get("confusion_matrix", []).tolist()
-            if metrics
-            else [],
+            "f1_weighted": metrics.get("f1_weighted"),
+            "cohen_kappa": metrics.get("cohen_kappa"),
+            "mcc": metrics.get("mcc"),
+            "confusion_matrix": cm.tolist() if hasattr(cm, "tolist") else (cm or []),
+            "confusion_matrix_normalized": cm_normalized.tolist()
+            if hasattr(cm_normalized, "tolist")
+            else (cm_normalized or []),
+            "per_class": metrics.get("per_class", {}) if metrics else {},
             "classification_report": metrics.get("report", ""),
         },
         "classes": classes,
@@ -286,6 +309,64 @@ def run_evaluation(
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics_report, f, indent=2, ensure_ascii=False)
     logger.info(f"Saved metrics to {metrics_path}")
+
+    # Step 6: Generate conclusion
+    logger.info("-" * 60)
+    logger.info("Step 6: Generating conclusion")
+    conclusion_text = None
+    conclusion_path = None
+    conclusion_payload = None
+    conclusion_token_usage = None
+    try:
+        conclusion_payload = build_conclusion_payload(
+            dataset=str(dataset_path),
+            classes=classes,
+            test_size=len(test_df),
+            k_similar=k_similar,
+            use_references=use_references,
+            embedding_model=EMBEDDING_MODEL,
+            llm_model=classifier.model,
+            random_state=random_state,
+            classifications=classifications,
+            errors=errors,
+            metrics=metrics,
+            token_usage=total_tokens,
+            max_misclassified=20,
+            timestamp=timestamp,
+        )
+        system_prompt = build_conclusion_system_prompt()
+        user_prompt = build_conclusion_user_prompt(conclusion_payload)
+        conclusion_text, conclusion_token_usage = classifier.generate_conclusion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+
+        conclusion_path = output_path / "conclusion.json"
+        with open(conclusion_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "metadata": {
+                        "timestamp": timestamp,
+                        "dataset": str(dataset_path),
+                        "model": classifier.model,
+                    },
+                    "payload": conclusion_payload,
+                    "conclusion": conclusion_text,
+                    "token_usage": {
+                        "prompt_tokens": conclusion_token_usage.prompt_tokens,
+                        "completion_tokens": conclusion_token_usage.completion_tokens,
+                        "total_tokens": conclusion_token_usage.total_tokens,
+                    }
+                    if conclusion_token_usage
+                    else None,
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+        logger.info(f"Saved conclusion to {conclusion_path}")
+    except ConclusionError as e:
+        logger.error(f"Conclusion generation failed: {e.reason}")
 
     # Summary
     logger.info("=" * 60)
@@ -303,6 +384,9 @@ def run_evaluation(
     if metrics:
         logger.info(f"Accuracy: {metrics['accuracy']:.4f}")
         logger.info(f"F1 Macro: {metrics['f1_macro']:.4f}")
+        logger.info(f"F1 Weighted: {metrics['f1_weighted']:.4f}")
+        logger.info(f"Cohen's Kappa: {metrics['cohen_kappa']:.4f}")
+        logger.info(f"MCC: {metrics['mcc']:.4f}")
 
         # Log confusion matrix
         cm = metrics["confusion_matrix"]
@@ -322,6 +406,16 @@ def run_evaluation(
         "classifications_path": str(classifications_path),
         "metrics_path": str(metrics_path),
         "log_path": str(output_path / "run.log"),
+        "conclusion": conclusion_text,
+        "conclusion_path": str(conclusion_path) if conclusion_path else None,
+        "conclusion_payload": conclusion_payload,
+        "conclusion_token_usage": {
+            "prompt_tokens": conclusion_token_usage.prompt_tokens,
+            "completion_tokens": conclusion_token_usage.completion_tokens,
+            "total_tokens": conclusion_token_usage.total_tokens,
+        }
+        if conclusion_token_usage
+        else None,
         "total": len(test_df),
         "classified": len(classifications),
         "correct": n_correct,

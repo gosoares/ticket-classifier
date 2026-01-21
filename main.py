@@ -118,10 +118,18 @@ def main() -> int:
             print(f"  Completion:   {tokens['completion_tokens']:,}")
             print(f"  Total:        {tokens['total_tokens']:,}")
 
+        if result.get("conclusion"):
+            print("\n" + "=" * 60)
+            print("CONCLUSÃO (LLM)")
+            print("=" * 60)
+            print(result["conclusion"])
+
         print("\nOutput files:")
         print(f"  - {result['classifications_path']}")
         print(f"  - {result['metrics_path']}")
         print(f"  - {result['log_path']}")
+        if result.get("conclusion_path"):
+            print(f"  - {result['conclusion_path']}")
 
         return 0
 

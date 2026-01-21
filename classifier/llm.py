@@ -38,6 +38,14 @@ class ClassificationError(Exception):
         super().__init__(f"Classification failed: {reason}")
 
 
+class ConclusionError(Exception):
+    """Raised when conclusion generation fails."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(f"Conclusion generation failed: {reason}")
+
+
 class ClassificationResult(BaseModel):
     """Result of ticket classification."""
 
@@ -325,3 +333,70 @@ class TicketClassifier:
             max_retries=max_retries,
             reasoning_effort=reasoning_effort,
         )
+
+    def generate_conclusion(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        reasoning_effort: str | None = None,
+    ) -> tuple[str, TokenUsage]:
+        """
+        Generate a conclusion text using the LLM.
+
+        Args:
+            system_prompt: System prompt for the evaluator role
+            user_prompt: User prompt containing the payload and tasks
+            reasoning_effort: Reasoning effort level (low/medium/high) or None
+
+        Returns:
+            Tuple of (conclusion_text, token_usage)
+
+        Raises:
+            ConclusionError: If the LLM call fails or returns empty content
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            request_kwargs = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": 0.0,
+            }
+
+            if self.seed is not None:
+                request_kwargs["seed"] = self.seed
+
+            if reasoning_effort:
+                is_mimo = self.model and "mimo" in self.model.lower()
+                if is_mimo:
+                    request_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+                else:
+                    request_kwargs["extra_body"] = {
+                        "reasoning": {"effort": reasoning_effort}
+                    }
+
+            response = self.client.chat.completions.create(**request_kwargs)
+        except APITimeoutError as e:
+            logger.error("API timeout while generating conclusion")
+            raise ConclusionError("API timeout - LLM took too long to respond") from e
+        except APIError as e:
+            logger.error(f"API error while generating conclusion: {e.message}")
+            raise ConclusionError(f"API error: {e.message}") from e
+
+        token_usage = TokenUsage(0, 0, 0)
+        if response.usage:
+            token_usage = TokenUsage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+            )
+
+        message = response.choices[0].message if response.choices else None
+        content = message.content.strip() if message and message.content else ""
+        if not content:
+            raise ConclusionError("Empty response from LLM")
+
+        return content, token_usage
