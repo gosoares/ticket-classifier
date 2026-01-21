@@ -65,6 +65,7 @@ class ClassificationDetails:
     similar_tickets: list[dict]
     retries: int
     token_usage: TokenUsage
+    reasoning: str | None = None  # LLM reasoning/thinking process
 
 
 class TicketClassifier:
@@ -95,6 +96,7 @@ class TicketClassifier:
         user_prompt: str,
         similar_tickets: list[dict],
         max_retries: int = 1,
+        reasoning_effort: str | None = None,
     ) -> ClassificationDetails:
         """
         Call the LLM with pre-built prompts.
@@ -105,6 +107,7 @@ class TicketClassifier:
             user_prompt: Pre-built user prompt
             similar_tickets: List of similar tickets (for result metadata)
             max_retries: Number of retries if JSON parsing fails
+            reasoning_effort: Reasoning effort level (low/medium/high) or None to disable
 
         Returns:
             ClassificationDetails with result, prompts, and metadata
@@ -118,17 +121,35 @@ class TicketClassifier:
         ]
 
         last_content = ""
+        last_reasoning = None
         retries_used = 0
         total_usage = TokenUsage(0, 0, 0)
 
         for attempt in range(max_retries + 1):
             logger.debug(f"Classification attempt {attempt + 1}/{max_retries + 1}")
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
-                )
+                # Build request kwargs
+                request_kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                }
+                # Add reasoning parameter if specified
+                # MiMo uses "enabled" while others use "effort"
+                if reasoning_effort:
+                    is_mimo = self.model and "mimo" in self.model.lower()
+                    if is_mimo:
+                        request_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+                        logger.debug("Using MiMo reasoning format (enabled)")
+                    else:
+                        request_kwargs["extra_body"] = {
+                            "reasoning": {"effort": reasoning_effort}
+                        }
+                        logger.debug(
+                            f"Using standard reasoning format (effort={reasoning_effort})"
+                        )
+
+                response = self.client.chat.completions.create(**request_kwargs)
             except APITimeoutError as e:
                 logger.error("API timeout - LLM took too long to respond")
                 raise ClassificationError(
@@ -158,8 +179,33 @@ class TicketClassifier:
                     f"completion: {call_usage.completion_tokens})"
                 )
 
-            last_content = response.choices[0].message.content or ""
+            message = response.choices[0].message
+            last_content = message.content or ""
             logger.debug(f"LLM response: {last_content[:200]}...")
+
+            # Extract reasoning from response
+            # Try multiple formats: reasoning_details (standard), reasoning_content (MiMo)
+            last_reasoning = None
+
+            # Standard OpenRouter format
+            reasoning_details = getattr(message, "reasoning_details", None)
+            if reasoning_details:
+                reasoning_texts = [
+                    rd.get("text", "")
+                    if isinstance(rd, dict)
+                    else getattr(rd, "text", "")
+                    for rd in reasoning_details
+                ]
+                last_reasoning = "\n".join(reasoning_texts) if reasoning_texts else None
+
+            # MiMo format
+            if not last_reasoning:
+                reasoning_content = getattr(message, "reasoning_content", None)
+                if reasoning_content:
+                    last_reasoning = reasoning_content
+
+            if last_reasoning:
+                logger.debug(f"Reasoning captured: {len(last_reasoning)} chars")
 
             try:
                 result = ClassificationResult.model_validate_json(last_content)
@@ -171,6 +217,7 @@ class TicketClassifier:
                     similar_tickets=similar_tickets,
                     retries=retries_used,
                     token_usage=total_usage,
+                    reasoning=last_reasoning,
                 )
             except ValidationError:
                 retries_used += 1
@@ -195,6 +242,7 @@ class TicketClassifier:
         classes: list[str],
         reference_tickets: dict[str, dict] | None = None,
         max_retries: int = 1,
+        reasoning_effort: str | None = None,
     ) -> ClassificationDetails:
         """
         Classify a ticket using LLM (convenience method that builds prompts).
@@ -205,6 +253,7 @@ class TicketClassifier:
             classes: List of valid class names
             reference_tickets: Dict of representative tickets per class (optional)
             max_retries: Number of retries if JSON parsing fails
+            reasoning_effort: Reasoning effort level (low/medium/high) or None
 
         Returns:
             ClassificationDetails with result, prompts, and metadata
@@ -215,4 +264,6 @@ class TicketClassifier:
         logger.debug("Building prompts for classification")
         system = build_system_prompt(classes)
         user = build_user_prompt(ticket, similar_tickets, reference_tickets)
-        return self.call_llm(ticket, system, user, similar_tickets, max_retries)
+        return self.call_llm(
+            ticket, system, user, similar_tickets, max_retries, reasoning_effort
+        )

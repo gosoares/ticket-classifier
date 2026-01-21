@@ -46,7 +46,8 @@ cp .env.example .env
 |----------|-----------|---------|
 | `LLM_BASE_URL` | URL da API | `https://openrouter.ai/api/v1` |
 | `LLM_API_KEY` | Chave da API | `sk-...` |
-| `LLM_MODEL` | Nome do modelo | `openai/gpt-4o-mini` |
+| `LLM_MODEL` | Nome do modelo | `xiaomi/mimo-v2-flash:free` |
+| `LLM_REASONING_EFFORT` | Nível de reasoning (padrão: `medium`) | `low`, `medium`, `high`, ou vazio para desativar |
 
 ### Exemplos por Provider
 
@@ -76,7 +77,7 @@ LLM_MODEL=gpt-4o-mini
 ### Via CLI
 
 ```bash
-# Execução padrão
+# Execução padrão (reasoning habilitado)
 uv run python main.py
 
 # Ver todas as opções
@@ -84,6 +85,9 @@ uv run python main.py --help
 
 # Execução com parâmetros customizados
 uv run python main.py -v --test-size 200 --k-similar 5
+
+# Desabilitar reasoning para menor uso de tokens
+uv run python main.py --reasoning ""
 ```
 
 **Opções CLI:**
@@ -96,6 +100,7 @@ uv run python main.py -v --test-size 200 --k-similar 5
 | `--k-similar` | Tickets similares no RAG | `5` |
 | `--model` | Override do modelo LLM | env var |
 | `--no-references` | Desabilita tickets de referência | `False` |
+| `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | `medium` |
 | `-v, --verbose` | Logs detalhados no terminal | `False` |
 
 ### Via Notebook
@@ -111,7 +116,7 @@ Arquivos gerados em `output/`:
 
 | Arquivo | Conteúdo |
 |---------|----------|
-| `classifications.json` | Classificações detalhadas com justificativas |
+| `classifications.json` | Classificações detalhadas com justificativas e reasoning |
 | `metrics.json` | Métricas de avaliação |
 | `run.log` | Log de execução |
 

@@ -4,7 +4,7 @@
 import argparse
 import sys
 
-from classifier.config import K_SIMILAR, RANDOM_STATE, TEST_SIZE
+from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, TEST_SIZE
 from classifier.runner import run_evaluation
 
 
@@ -70,6 +70,14 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose logging to terminal",
     )
 
+    parser.add_argument(
+        "--reasoning",
+        type=str,
+        default=REASONING_EFFORT,
+        choices=["low", "medium", "high", "", None],
+        help="Enable LLM reasoning with specified effort level",
+    )
+
     return parser.parse_args()
 
 
@@ -87,6 +95,7 @@ def main() -> int:
             model=args.model,
             use_references=not args.no_references,
             verbose=args.verbose,
+            reasoning_effort=args.reasoning,
         )
 
         # Print summary to stdout

@@ -6,7 +6,7 @@ import numpy as np
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from classifier.config import K_SIMILAR
+from classifier.config import K_SIMILAR, REASONING_EFFORT
 from classifier.llm import ClassificationDetails, TicketClassifier
 from classifier.logging_config import get_logger
 from classifier.prompts import build_system_prompt, build_user_prompt
@@ -31,6 +31,7 @@ def create_graph(
     classifier: TicketClassifier,
     classes: list[str],
     reference_tickets: dict[str, dict] | None = None,
+    reasoning_effort: str | None = REASONING_EFFORT,
 ) -> CompiledStateGraph:
     """
     Create the classification pipeline graph.
@@ -46,6 +47,7 @@ def create_graph(
         classifier: TicketClassifier instance
         classes: List of valid class names
         reference_tickets: Optional dict of representative tickets per class
+        reasoning_effort: Reasoning effort level (low/medium/high) or None
 
     Returns:
         Compiled StateGraph ready for invocation
@@ -85,6 +87,7 @@ def create_graph(
             system_prompt=state["system_prompt"],
             user_prompt=state["user_prompt"],
             similar_tickets=state["similar_tickets"],
+            reasoning_effort=reasoning_effort,
         )
         logger.debug(f"Classification complete: {result.result.classe}")
         return {"result": result}
@@ -110,6 +113,7 @@ def classify_ticket(
     classifier: TicketClassifier,
     classes: list[str],
     reference_tickets: dict[str, dict] | None = None,
+    reasoning_effort: str | None = REASONING_EFFORT,
 ) -> ClassificationDetails:
     """
     Classify a single ticket using the RAG pipeline.
@@ -120,12 +124,15 @@ def classify_ticket(
         classifier: TicketClassifier instance
         classes: List of valid class names
         reference_tickets: Optional dict of representative tickets per class
+        reasoning_effort: Reasoning effort level (low/medium/high) or None
 
     Returns:
         ClassificationDetails with result, prompts, and metadata
     """
     logger.debug(f"Classifying ticket: {ticket[:50]}...")
-    graph = create_graph(retriever, classifier, classes, reference_tickets)
+    graph = create_graph(
+        retriever, classifier, classes, reference_tickets, reasoning_effort
+    )
     result = graph.invoke(
         {
             "ticket": ticket,

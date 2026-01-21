@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from classifier.config import K_SIMILAR, RANDOM_STATE, TEST_SIZE
+from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, TEST_SIZE
 from classifier.data import load_dataset, train_test_split_balanced
 from classifier.graph import classify_ticket
 from classifier.llm import ClassificationError, TicketClassifier, TokenUsage
@@ -26,6 +26,7 @@ def run_evaluation(
     model: str | None = None,
     use_references: bool = True,
     verbose: bool = False,
+    reasoning_effort: str | None = REASONING_EFFORT,
 ) -> dict:
     """
     Execute the full evaluation pipeline.
@@ -46,6 +47,7 @@ def run_evaluation(
         model: LLM model name (from LLM_MODEL env var if not specified)
         use_references: Whether to use reference tickets in prompts
         verbose: Enable verbose logging to terminal
+        reasoning_effort: Reasoning effort level (low/medium/high) or None
 
     Returns:
         Dict with metrics and output file paths
@@ -66,6 +68,7 @@ def run_evaluation(
     logger.info(f"K similar: {k_similar}")
     logger.info(f"Model: {model}")
     logger.info(f"Use references: {use_references}")
+    logger.info(f"Reasoning effort: {reasoning_effort}")
     logger.info(f"Random state: {random_state}")
 
     # Step 1: Load and split data
@@ -108,6 +111,7 @@ def run_evaluation(
                 classifier=classifier,
                 classes=classes,
                 reference_tickets=reference_tickets,
+                reasoning_effort=reasoning_effort,
             )
 
             y_true.append(true_label)
@@ -126,6 +130,7 @@ def run_evaluation(
                     "true_class": true_label,
                     "predicted_class": details.result.classe,
                     "justification": details.result.justificativa,
+                    "reasoning": details.reasoning,
                     "correct": is_correct,
                     "system_prompt": details.system_prompt,
                     "user_prompt": details.user_prompt,
@@ -181,6 +186,7 @@ def run_evaluation(
             "k_similar": k_similar,
             "model": model,
             "use_references": use_references,
+            "reasoning_effort": reasoning_effort,
             "random_state": random_state,
         },
         "summary": {
