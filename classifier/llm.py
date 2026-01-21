@@ -72,17 +72,20 @@ class TicketClassifier:
     """Classifies tickets using LLM with RAG context."""
 
     model: str
+    seed: int | None
 
     def __init__(
         self,
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        seed: int | None = None,
     ):
         resolved_model = model or LLM_MODEL
         if not resolved_model:
             raise ValueError("LLM_MODEL must be set via parameter or LLM_MODEL env var")
         self.model = resolved_model
+        self.seed = seed
         self.client = OpenAI(
             base_url=base_url or os.environ.get("LLM_BASE_URL"),
             api_key=api_key or os.environ.get("LLM_API_KEY"),
@@ -133,7 +136,12 @@ class TicketClassifier:
                     "model": self.model,
                     "messages": messages,
                     "response_format": {"type": "json_object"},
+                    "temperature": 0.0,  # Deterministic output
                 }
+                # Add seed if specified for additional determinism
+                if self.seed is not None:
+                    request_kwargs["seed"] = self.seed
+                    logger.debug(f"Using seed for deterministic output: {self.seed}")
                 # Add reasoning parameter if specified
                 # MiMo uses "enabled" while others use "effort"
                 if reasoning_effort:

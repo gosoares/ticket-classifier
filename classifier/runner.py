@@ -91,7 +91,7 @@ def run_evaluation(
     # Step 3: Classify test tickets
     logger.info("-" * 60)
     logger.info(f"Step 3: Classifying {len(test_df)} test tickets")
-    classifier = TicketClassifier(model=model)
+    classifier = TicketClassifier(model=model, seed=random_state)
 
     classifications = []
     errors = []
