@@ -21,6 +21,8 @@ Classifique o ticket em UMA das seguintes categorias:
 Responda APENAS com JSON no formato:
 {{"classe": "<categoria>", "justificativa": "<explicação curta de 1-2 frases>"}}
 
+IMPORTANTE: A justificativa deve ser escrita em **Português (Brasil)**.
+
 A justificativa deve mencionar palavras-chave ou padrões do ticket que justificam a classificação."""
 
 
