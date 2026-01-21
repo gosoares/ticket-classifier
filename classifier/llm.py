@@ -88,22 +88,22 @@ class TicketClassifier:
             timeout=20.0,  # timeout to prevent hanging
         )
 
-    def classify(
+    def call_llm(
         self,
         ticket: str,
+        system_prompt: str,
+        user_prompt: str,
         similar_tickets: list[dict],
-        classes: list[str],
-        reference_tickets: dict[str, dict] | None = None,
         max_retries: int = 1,
     ) -> ClassificationDetails:
         """
-        Classify a ticket using LLM.
+        Call the LLM with pre-built prompts.
 
         Args:
-            ticket: The ticket text to classify
-            similar_tickets: List of similar tickets from retriever
-            classes: List of valid class names
-            reference_tickets: Dict of representative tickets per class (optional)
+            ticket: The ticket text (for error reporting)
+            system_prompt: Pre-built system prompt
+            user_prompt: Pre-built user prompt
+            similar_tickets: List of similar tickets (for result metadata)
             max_retries: Number of retries if JSON parsing fails
 
         Returns:
@@ -112,13 +112,9 @@ class TicketClassifier:
         Raises:
             ClassificationError: If classification fails after all retries
         """
-        logger.debug("Building prompts for classification")
-        system = build_system_prompt(classes)
-        user = build_user_prompt(ticket, similar_tickets, reference_tickets)
-
         messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ]
 
         last_content = ""
@@ -170,8 +166,8 @@ class TicketClassifier:
                 logger.debug(f"Classification successful: {result.classe}")
                 return ClassificationDetails(
                     result=result,
-                    system_prompt=system,
-                    user_prompt=user,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
                     similar_tickets=similar_tickets,
                     retries=retries_used,
                     token_usage=total_usage,
@@ -191,3 +187,32 @@ class TicketClassifier:
             reason="Invalid JSON after retries",
             raw_response=last_content,
         )
+
+    def classify(
+        self,
+        ticket: str,
+        similar_tickets: list[dict],
+        classes: list[str],
+        reference_tickets: dict[str, dict] | None = None,
+        max_retries: int = 1,
+    ) -> ClassificationDetails:
+        """
+        Classify a ticket using LLM (convenience method that builds prompts).
+
+        Args:
+            ticket: The ticket text to classify
+            similar_tickets: List of similar tickets from retriever
+            classes: List of valid class names
+            reference_tickets: Dict of representative tickets per class (optional)
+            max_retries: Number of retries if JSON parsing fails
+
+        Returns:
+            ClassificationDetails with result, prompts, and metadata
+
+        Raises:
+            ClassificationError: If classification fails after all retries
+        """
+        logger.debug("Building prompts for classification")
+        system = build_system_prompt(classes)
+        user = build_user_prompt(ticket, similar_tickets, reference_tickets)
+        return self.call_llm(ticket, system, user, similar_tickets, max_retries)

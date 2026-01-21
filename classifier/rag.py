@@ -38,12 +38,26 @@ class TicketRetriever:
         )
         logger.info("Indexing complete")
 
-    def retrieve(self, query: str, k: int = 5) -> list[dict]:
+    def embed(self, text: str) -> np.ndarray:
         """
-        Retrieve k most similar tickets.
+        Generate embedding for a text.
 
         Args:
-            query: Query text
+            text: Text to embed
+
+        Returns:
+            Normalized embedding vector
+        """
+        embedding = self.model.encode(text, convert_to_numpy=True)
+        embedding = embedding / np.linalg.norm(embedding)
+        return embedding
+
+    def search(self, query_embedding: np.ndarray, k: int = 5) -> list[dict]:
+        """
+        Search for similar tickets using a pre-computed embedding.
+
+        Args:
+            query_embedding: Normalized embedding vector
             k: Number of tickets to retrieve
 
         Returns:
@@ -52,12 +66,8 @@ class TicketRetriever:
         if self.embeddings is None or self.tickets is None:
             raise ValueError("Index not built. Call index() first.")
 
-        # Embed and normalize query
-        query_emb = self.model.encode(query, convert_to_numpy=True)
-        query_emb = query_emb / np.linalg.norm(query_emb)
-
         # Cosine similarity (dot product of normalized vectors)
-        scores = self.embeddings @ query_emb
+        scores = self.embeddings @ query_embedding
 
         # Get top-k indices
         top_k_idx = np.argsort(scores)[::-1][:k]
@@ -73,6 +83,20 @@ class TicketRetriever:
             )
 
         return results
+
+    def retrieve(self, query: str, k: int = 5) -> list[dict]:
+        """
+        Retrieve k most similar tickets.
+
+        Args:
+            query: Query text
+            k: Number of tickets to retrieve
+
+        Returns:
+            List of dicts with 'text', 'class', and 'score' keys
+        """
+        query_emb = self.embed(query)
+        return self.search(query_emb, k)
 
     def compute_representatives(self) -> dict[str, dict]:
         """
