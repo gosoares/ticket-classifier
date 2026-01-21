@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 from tqdm import tqdm
 
 from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, TEST_SIZE
@@ -15,6 +16,107 @@ from classifier.metrics import evaluate
 from classifier.rag import TicketRetriever
 
 logger = get_logger("runner")
+
+
+def classify_batch(
+    test_df: pd.DataFrame,
+    retriever: TicketRetriever,
+    classifier: TicketClassifier,
+    classes: list[str],
+    reference_tickets: dict[str, dict] | None = None,
+    reasoning_effort: str | None = REASONING_EFFORT,
+    show_progress: bool = True,
+) -> tuple[list[dict], list[dict], TokenUsage]:
+    """
+    Classify a batch of tickets.
+
+    Args:
+        test_df: DataFrame with 'Document' and 'Topic_group' columns
+        retriever: Indexed TicketRetriever instance
+        classifier: TicketClassifier instance
+        classes: List of valid class names
+        reference_tickets: Optional dict of representative tickets per class
+        reasoning_effort: Reasoning effort level (low/medium/high) or None
+        show_progress: Whether to show progress bar
+
+    Returns:
+        Tuple of (classifications, errors, total_tokens)
+        - classifications: List of dicts with ticket, true_class, predicted_class,
+          justification, reasoning, correct, system_prompt, user_prompt,
+          similar_tickets, retries, token_usage
+        - errors: List of dicts with ticket, true_class, reason, raw_response
+        - total_tokens: TokenUsage with aggregated token counts
+    """
+    classifications = []
+    errors = []
+    y_true = []
+    y_pred = []
+    total_tokens = TokenUsage(0, 0, 0)
+
+    pbar = tqdm(
+        test_df.iterrows(),
+        total=len(test_df),
+        desc="Classifying",
+        disable=not show_progress,
+    )
+    for _, row in pbar:
+        ticket_text = row["Document"]
+        true_label = row["Topic_group"]
+
+        try:
+            details = classify_ticket(
+                ticket=ticket_text,
+                retriever=retriever,
+                classifier=classifier,
+                classes=classes,
+                reference_tickets=reference_tickets,
+                reasoning_effort=reasoning_effort,
+            )
+
+            y_true.append(true_label)
+            y_pred.append(details.result.classe)
+
+            # Accumulate token usage
+            total_tokens = total_tokens + details.token_usage
+
+            # Update progress bar with last result
+            is_correct = true_label == details.result.classe
+            if show_progress:
+                pbar.set_postfix(pred=details.result.classe, ok=is_correct)
+
+            classifications.append(
+                {
+                    "ticket": ticket_text,
+                    "true_class": true_label,
+                    "predicted_class": details.result.classe,
+                    "justification": details.result.justificativa,
+                    "reasoning": details.reasoning,
+                    "correct": is_correct,
+                    "system_prompt": details.system_prompt,
+                    "user_prompt": details.user_prompt,
+                    "similar_tickets": details.similar_tickets,
+                    "retries": details.retries,
+                    "token_usage": {
+                        "prompt_tokens": details.token_usage.prompt_tokens,
+                        "completion_tokens": details.token_usage.completion_tokens,
+                        "total_tokens": details.token_usage.total_tokens,
+                    },
+                }
+            )
+
+        except ClassificationError as e:
+            if show_progress:
+                pbar.set_postfix(error=e.reason[:20])
+            errors.append(
+                {
+                    "ticket": ticket_text,
+                    "true_class": true_label,
+                    "reason": e.reason,
+                    "raw_response": e.raw_response,
+                }
+            )
+
+    return classifications, errors, total_tokens
 
 
 def run_evaluation(
@@ -93,67 +195,19 @@ def run_evaluation(
     logger.info(f"Step 3: Classifying {len(test_df)} test tickets")
     classifier = TicketClassifier(model=model, seed=random_state)
 
-    classifications = []
-    errors = []
-    y_true = []
-    y_pred = []
-    total_tokens = TokenUsage(0, 0, 0)
+    classifications, errors, total_tokens = classify_batch(
+        test_df=test_df,
+        retriever=retriever,
+        classifier=classifier,
+        classes=classes,
+        reference_tickets=reference_tickets,
+        reasoning_effort=reasoning_effort,
+        show_progress=True,
+    )
 
-    pbar = tqdm(test_df.iterrows(), total=len(test_df), desc="Classifying")
-    for _, row in pbar:
-        ticket_text = row["Document"]
-        true_label = row["Topic_group"]
-
-        try:
-            details = classify_ticket(
-                ticket=ticket_text,
-                retriever=retriever,
-                classifier=classifier,
-                classes=classes,
-                reference_tickets=reference_tickets,
-                reasoning_effort=reasoning_effort,
-            )
-
-            y_true.append(true_label)
-            y_pred.append(details.result.classe)
-
-            # Accumulate token usage
-            total_tokens = total_tokens + details.token_usage
-
-            # Update progress bar with last result
-            is_correct = true_label == details.result.classe
-            pbar.set_postfix(pred=details.result.classe, ok=is_correct)
-
-            classifications.append(
-                {
-                    "ticket": ticket_text,
-                    "true_class": true_label,
-                    "predicted_class": details.result.classe,
-                    "justification": details.result.justificativa,
-                    "reasoning": details.reasoning,
-                    "correct": is_correct,
-                    "system_prompt": details.system_prompt,
-                    "user_prompt": details.user_prompt,
-                    "similar_tickets": details.similar_tickets,
-                    "retries": details.retries,
-                    "token_usage": {
-                        "prompt_tokens": details.token_usage.prompt_tokens,
-                        "completion_tokens": details.token_usage.completion_tokens,
-                        "total_tokens": details.token_usage.total_tokens,
-                    },
-                }
-            )
-
-        except ClassificationError as e:
-            pbar.set_postfix(error=e.reason[:20])
-            errors.append(
-                {
-                    "ticket": ticket_text,
-                    "true_class": true_label,
-                    "reason": e.reason,
-                    "raw_response": e.raw_response,
-                }
-            )
+    # Extract y_true and y_pred from classifications for metrics
+    y_true = [c["true_class"] for c in classifications]
+    y_pred = [c["predicted_class"] for c in classifications]
 
     logger.info(f"Classified: {len(classifications)}, Errors: {len(errors)}")
     logger.info(
