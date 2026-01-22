@@ -19,7 +19,7 @@ O sistema classifica tickets em 8 categorias e fornece uma justificativa explica
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/) (package manager)
-- Acesso a API LLM compatível com OpenAI
+- Um provider LLM compatível com OpenAI (recomendado: Ollama local)
 
 ## Instalação
 
@@ -41,10 +41,15 @@ cp .env.example .env
 
 | Variável | Descrição | Exemplo |
 |----------|-----------|---------|
-| `LLM_BASE_URL` | URL da API | `https://openrouter.ai/api/v1` |
-| `LLM_API_KEY` | Chave da API | `sk-...` |
-| `LLM_MODEL` | Nome do modelo | `xiaomi/mimo-v2-flash:free` |
+| `LLM_BASE_URL` | URL da API | `http://localhost:11434/v1` |
+| `LLM_MODEL` | Nome do modelo | `gemma2:2b` |
+| `LLM_API_KEY` | Chave da API | `ollama` |
 | `LLM_REASONING_EFFORT` | Nível de reasoning (padrão: `medium`) | `low`, `medium`, `high`, ou vazio para desativar |
+
+**Critérios do modelo escolhido (padrão):**
+- Gratuito e local (Ollama)
+- Não exige hardware avançado (modelo pequeno)
+- Baixa latência e custo previsível (sem dependência de provedores externos)
 
 ### Exemplos por Provider
 
@@ -59,7 +64,7 @@ LLM_MODEL=openai/gpt-4o-mini
 ```env
 LLM_BASE_URL=http://localhost:11434/v1
 LLM_API_KEY=ollama
-LLM_MODEL=qwen2.5:7b
+LLM_MODEL=gemma2:2b
 ```
 
 **OpenAI:**
@@ -74,7 +79,7 @@ LLM_MODEL=gpt-4o-mini
 ### Via CLI
 
 ```bash
-# Execução padrão (reasoning habilitado)
+# Execução padrão (reasoning opcional)
 uv run python main.py
 
 # Ver todas as opções
@@ -83,7 +88,7 @@ uv run python main.py --help
 # Execução com parâmetros customizados
 uv run python main.py -v --test-size 200 --k-similar 5
 
-# Desabilitar reasoning para menor uso de tokens
+# Desabilitar reasoning (menor uso de tokens/latência)
 uv run python main.py --reasoning ""
 ```
 
@@ -93,11 +98,14 @@ uv run python main.py --reasoning ""
 |-------|-----------|---------|
 | `--dataset` | Caminho do CSV | `dataset.csv` |
 | `--output` | Diretório de saída | `output` |
-| `--test-size` | Número de tickets de teste | `200` |
+| `--test-size` | Número de tickets de validação (balanceado) | `200` |
 | `--k-similar` | Tickets similares no RAG | `5` |
 | `--model` | Override do modelo LLM | env var |
 | `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | `medium` |
 | `-v, --verbose` | Logs detalhados no terminal | `False` |
+
+Observação: apesar do nome `--test-size`, o pipeline atual separa o dataset em **treino/teste/validação** e usa o conjunto
+de **validação** (balanceado) para a avaliação final e geração de justificativas.
 
 ### Via Notebook
 
@@ -113,7 +121,7 @@ Arquivos gerados em `output/`:
 | Arquivo | Conteúdo |
 |---------|----------|
 | `classifications.json` | Classificações detalhadas com justificativas e reasoning |
-| `metrics.json` | Métricas de avaliação |
+| `metrics.json` | Métricas no conjunto de validação |
 | `run.log` | Log de execução |
 
 ## Dataset
@@ -121,4 +129,4 @@ Arquivos gerados em `output/`:
 Dataset público do Kaggle: [IT Service Ticket Classification](https://www.kaggle.com/datasets/adisongoh/it-service-ticket-classification-dataset)
 
 - **~48.000 tickets** de suporte de TI
-- **8 classes:** Access/Login, Administrative rights, Hardware, HR Support, Internal Project, Miscellaneous, Purchase, Software
+- **Classes:** extraídas do próprio CSV (ex.: Access, Administrative rights, Hardware, HR Support, Internal Project, Miscellaneous, Purchase, Storage)

@@ -65,11 +65,12 @@ def build_user_prompt(
 {_format_similar_tickets(similar_tickets)}
 
 Responda APENAS com JSON no formato:
-{{"justificativa": "<explicação curta e objetiva de 2-4 frases>"}}
+{{"justificativa": "<explicação curta e objetiva de 1-3 frases>"}}
 
 Regras:
 - A justificativa deve ser auto contida.
 - Não mencione tickets similares explicitamente (ex.: “ticket 2”).
-- Use apenas evidências gerais do conteúdo do ticket."""
+- Use apenas evidências gerais do conteúdo do ticket.
+- Cite explicitamente de 2 a 4 termos literais do ticket entre aspas simples (ex.: 'vpn', 'password', 'oracle')."""
 
     return prompt
