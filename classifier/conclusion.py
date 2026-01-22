@@ -15,7 +15,8 @@ def build_conclusion_system_prompt() -> str:
         "Você é um analista técnico rigoroso. Use somente o JSON fornecido. "
         "Não invente números, não presuma informações ausentes. "
         "Se algo estiver faltando, declare a lacuna e o impacto. "
-        "Escreva em Português (Brasil), com foco em insights técnicos acionáveis."
+        "Escreva em Português (Brasil), com foco em insights técnicos acionáveis. "
+        "Não explique a estrutura do JSON nem descreva campos; interprete resultados."
     )
 
 
@@ -39,6 +40,8 @@ Formato da resposta:
 Regras:
 - Não inclua números que não estejam no JSON.
 - Quando citar uma métrica, use o valor exato do JSON.
+- Proibido explicar a estrutura do JSON ou listar chaves/campos.
+- Foque em conclusões, comparações e implicações dos valores.
 
 ```json
 {payload_json}

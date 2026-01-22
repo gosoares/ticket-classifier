@@ -48,6 +48,7 @@ cp .env.example .env
 | `LLM_MODEL` | Nome do modelo | `gemma2:2b` |
 | `LLM_API_KEY` | Chave da API | `ollama` |
 | `LLM_REASONING_EFFORT` | Nível de reasoning (padrão: desativado) | `low`, `medium`, `high`, ou vazio para desativar |
+| `JUSTIFICATION` | Modo de justificativa padrão (`linear`/`llm`) | `linear` |
 
 **Critérios do modelo escolhido (padrão):**
 - Gratuito e local (Ollama)
@@ -127,7 +128,7 @@ Arquivos gerados em `output/`:
 
 | Arquivo | Conteúdo |
 |---------|----------|
-| `classifications.json` | Classificações detalhadas com justificativas (linear ou LLM) |
+| `classifications.json` | Report detalhado com `classifications` (inclui `classe` e `justification`) e metadados |
 | `metrics.json` | Métricas no conjunto de validação |
 | `run.log` | Log de execução |
 
