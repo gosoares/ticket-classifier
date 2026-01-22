@@ -19,12 +19,13 @@ from classifier.conclusion import (
     build_conclusion_system_prompt,
     build_conclusion_user_prompt,
 )
-from classifier.data import load_dataset, train_test_split_balanced
-from classifier.graph import classify_ticket
+from classifier.classifiers import TfidfClassifier
+from classifier.data import load_dataset, train_test_validation_split
+from classifier.graph import justify_ticket
 from classifier.llm import (
-    ClassificationError,
+    JustificationError,
     ConclusionError,
-    TicketClassifier,
+    TicketJustifier,
     TokenUsage,
 )
 from classifier.logging_config import get_logger, setup_logging
@@ -37,22 +38,21 @@ logger = get_logger("runner")
 def classify_batch(
     test_df: pd.DataFrame,
     retriever: TicketRetriever,
-    classifier: TicketClassifier,
+    justifier: TicketJustifier,
+    ml_classifier: TfidfClassifier,
     classes: list[str],
-    reference_tickets: dict[str, dict] | None = None,
     k_similar: int = K_SIMILAR,
     reasoning_effort: str | None = REASONING_EFFORT,
     show_progress: bool = True,
 ) -> tuple[list[dict], list[dict], TokenUsage]:
     """
-    Classify a batch of tickets.
+    Generate justifications for a batch using ML predictions.
 
     Args:
         test_df: DataFrame with 'Document' and 'Topic_group' columns
         retriever: Indexed TicketRetriever instance
-        classifier: TicketClassifier instance
-        classes: List of valid class names
-        reference_tickets: Optional dict of representative tickets per class
+        justifier: TicketJustifier instance
+        ml_classifier: Trained TF-IDF classifier
         reasoning_effort: Reasoning effort level (low/medium/high) or None
         show_progress: Whether to show progress bar
 
@@ -73,7 +73,7 @@ def classify_batch(
     pbar = tqdm(
         test_df.iterrows(),
         total=len(test_df),
-        desc="Classifying",
+        desc="Justifying",
         disable=not show_progress,
     )
     for _, row in pbar:
@@ -81,32 +81,32 @@ def classify_batch(
         true_label = row["Topic_group"]
 
         try:
-            details = classify_ticket(
+            details = justify_ticket(
                 ticket=ticket_text,
                 retriever=retriever,
-                classifier=classifier,
-                classes=classes,
-                reference_tickets=reference_tickets,
+                justifier=justifier,
+                ml_classifier=ml_classifier,
                 reasoning_effort=reasoning_effort,
                 k_similar=k_similar,
             )
 
             y_true.append(true_label)
-            y_pred.append(details.result.classe)
+            predicted_label = details.predicted_class
+            y_pred.append(predicted_label)
 
             # Accumulate token usage
             total_tokens = total_tokens + details.token_usage
 
             # Update progress bar with last result
-            is_correct = true_label == details.result.classe
+            is_correct = true_label == predicted_label
             if show_progress:
-                pbar.set_postfix(pred=details.result.classe, ok=is_correct)
+                pbar.set_postfix(pred=predicted_label, ok=is_correct)
 
             classifications.append(
                 {
                     "ticket": ticket_text,
                     "true_class": true_label,
-                    "predicted_class": details.result.classe,
+                    "predicted_class": predicted_label,
                     "justification": details.result.justificativa,
                     "reasoning": details.reasoning,
                     "correct": is_correct,
@@ -122,7 +122,7 @@ def classify_batch(
                 }
             )
 
-        except ClassificationError as e:
+        except JustificationError as e:
             if show_progress:
                 pbar.set_postfix(error=e.reason[:20])
             errors.append(
@@ -144,7 +144,6 @@ def run_evaluation(
     k_similar: int = K_SIMILAR,
     random_state: int = RANDOM_STATE,
     model: str | None = None,
-    use_references: bool = True,
     verbose: bool = False,
     reasoning_effort: str | None = REASONING_EFFORT,
 ) -> dict:
@@ -152,20 +151,20 @@ def run_evaluation(
     Execute the full evaluation pipeline.
 
     Steps:
-    1. Load dataset and split into train/test
-    2. Index training tickets for RAG retrieval
-    3. Classify all test tickets
-    4. Calculate evaluation metrics
-    5. Save results to output files
+    1. Load dataset and split into train/test/validation
+    2. Train ML classifier
+    3. Index training tickets for RAG retrieval
+    4. Generate justifications
+    5. Calculate evaluation metrics
+    6. Save results to output files
 
     Args:
         dataset_path: Path to the CSV dataset file
         output_dir: Directory for output files
-        test_size: Number of test samples (divided equally among classes)
+        test_size: Number of validation samples (divided equally among classes)
         k_similar: Number of similar tickets to retrieve
         random_state: Random seed for reproducibility
         model: LLM model name (from LLM_MODEL env var if not specified)
-        use_references: Whether to use reference tickets in prompts
         verbose: Enable verbose logging to terminal
         reasoning_effort: Reasoning effort level (low/medium/high) or None
 
@@ -184,10 +183,9 @@ def run_evaluation(
     # Log configuration
     logger.info(f"Dataset: {dataset_path}")
     logger.info(f"Output: {output_path}")
-    logger.info(f"Test size: {test_size}")
+    logger.info(f"Validation size: {test_size}")
     logger.info(f"K similar: {k_similar}")
     logger.info(f"Model: {model}")
-    logger.info(f"Use references: {use_references}")
     logger.info(f"Reasoning effort: {reasoning_effort}")
     logger.info(f"Random state: {random_state}")
 
@@ -195,30 +193,36 @@ def run_evaluation(
     logger.info("-" * 60)
     logger.info("Step 1: Loading and splitting dataset")
     df, classes = load_dataset(Path(dataset_path))
-    train_df, test_df = train_test_split_balanced(df, test_size, random_state)
+    train_df, test_df, validation_df = train_test_validation_split(
+        df,
+        validation_size=test_size,
+        random_state=random_state,
+    )
 
-    # Step 2: Index training data
+    # Step 2: Train ML classifier
     logger.info("-" * 60)
-    logger.info("Step 2: Indexing training data for RAG")
+    logger.info("Step 2: Training ML classifier")
+    ml_classifier = TfidfClassifier.linear_svc(random_state=random_state)
+    ml_classifier.fit(train_df)
+    logger.info("ML classifier trained")
+
+    # Step 3: Index training data
+    logger.info("-" * 60)
+    logger.info("Step 3: Indexing training data for RAG")
     retriever = TicketRetriever()
     retriever.index(train_df)
 
-    # Compute reference tickets if needed
-    reference_tickets = None
-    if use_references:
-        reference_tickets = retriever.compute_representatives()
-
-    # Step 3: Classify test tickets
+    # Step 4: Generate justifications
     logger.info("-" * 60)
-    logger.info(f"Step 3: Classifying {len(test_df)} test tickets")
-    classifier = TicketClassifier(model=model, seed=random_state)
+    logger.info("Step 4: Generating justifications with RAG + LLM (validation)")
+    justifier = TicketJustifier(model=model, seed=random_state)
 
     classifications, errors, total_tokens = classify_batch(
-        test_df=test_df,
+        test_df=validation_df,
         retriever=retriever,
-        classifier=classifier,
+        justifier=justifier,
+        ml_classifier=ml_classifier,
         classes=classes,
-        reference_tickets=reference_tickets,
         k_similar=k_similar,
         reasoning_effort=reasoning_effort,
         show_progress=True,
@@ -228,15 +232,15 @@ def run_evaluation(
     y_true = [c["true_class"] for c in classifications]
     y_pred = [c["predicted_class"] for c in classifications]
 
-    logger.info(f"Classified: {len(classifications)}, Errors: {len(errors)}")
+    logger.info(f"Justified: {len(classifications)}, Errors: {len(errors)}")
     logger.info(
         f"Total tokens: {total_tokens.total_tokens} "
         f"(prompt: {total_tokens.prompt_tokens}, completion: {total_tokens.completion_tokens})"
     )
 
-    # Step 4: Calculate metrics
+    # Step 5: Calculate metrics
     logger.info("-" * 60)
-    logger.info("Step 4: Calculating metrics")
+    logger.info("Step 5: Calculating metrics")
     metrics = {}
     if y_true:
         metrics = evaluate(y_true, y_pred, classes)
@@ -245,7 +249,7 @@ def run_evaluation(
 
     # Step 5: Save outputs
     logger.info("-" * 60)
-    logger.info("Step 5: Saving results")
+    logger.info("Step 6: Saving results")
 
     timestamp = datetime.now().isoformat()
 
@@ -255,15 +259,14 @@ def run_evaluation(
         "metadata": {
             "timestamp": timestamp,
             "dataset": str(dataset_path),
-            "test_size": test_size,
+            "validation_size": test_size,
             "k_similar": k_similar,
             "model": model,
-            "use_references": use_references,
             "reasoning_effort": reasoning_effort,
             "random_state": random_state,
         },
         "summary": {
-            "total": len(test_df),
+            "total": len(validation_df),
             "classified": len(classifications),
             "errors": len(errors),
             "correct": sum(1 for c in classifications if c["correct"]),
@@ -288,7 +291,7 @@ def run_evaluation(
         "metadata": {
             "timestamp": timestamp,
             "dataset": str(dataset_path),
-            "test_size": test_size,
+            "validation_size": test_size,
             "model": model,
         },
         "metrics": {
@@ -312,7 +315,7 @@ def run_evaluation(
 
     # Step 6: Generate conclusion
     logger.info("-" * 60)
-    logger.info("Step 6: Generating conclusion")
+    logger.info("Step 7: Generating conclusion")
     conclusion_text = None
     conclusion_path = None
     conclusion_payload = None
@@ -321,11 +324,10 @@ def run_evaluation(
         conclusion_payload = build_conclusion_payload(
             dataset=str(dataset_path),
             classes=classes,
-            test_size=len(test_df),
+            test_size=len(validation_df),
             k_similar=k_similar,
-            use_references=use_references,
             embedding_model=EMBEDDING_MODEL,
-            llm_model=classifier.model,
+            llm_model=justifier.model,
             random_state=random_state,
             classifications=classifications,
             errors=errors,
@@ -336,7 +338,7 @@ def run_evaluation(
         )
         system_prompt = build_conclusion_system_prompt()
         user_prompt = build_conclusion_user_prompt(conclusion_payload)
-        conclusion_text, conclusion_token_usage = classifier.generate_conclusion(
+        conclusion_text, conclusion_token_usage = justifier.generate_conclusion(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
@@ -348,7 +350,7 @@ def run_evaluation(
                     "metadata": {
                         "timestamp": timestamp,
                         "dataset": str(dataset_path),
-                        "model": classifier.model,
+                        "model": justifier.model,
                     },
                     "payload": conclusion_payload,
                     "conclusion": conclusion_text,
@@ -416,7 +418,7 @@ def run_evaluation(
         }
         if conclusion_token_usage
         else None,
-        "total": len(test_df),
+        "total": len(validation_df),
         "classified": len(classifications),
         "correct": n_correct,
         "wrong": n_wrong,

@@ -1,11 +1,11 @@
 # IT Service Ticket Classification
 
-Sistema de classificação automática de tickets de suporte de TI utilizando RAG (Retrieval Augmented Generation) com LangGraph.
+Sistema de classificação automática de tickets de suporte de TI com ML (TF-IDF + LinearSVC) e RAG para **justificativas** via LLM.
 
 ## Objetivo
 
 - **Entrada:** texto do ticket (string)
-- **Saída:** `{"classe": "...", "justificativa": "..."}`
+- **Saída:** `{"classe": "...", "justificativa": "..."}` (classe vem do ML, justificativa do LLM)
 
 O sistema classifica tickets em 8 categorias e fornece uma justificativa explicando o motivo da classificação.
 
@@ -96,7 +96,6 @@ uv run python main.py --reasoning ""
 | `--test-size` | Número de tickets de teste | `200` |
 | `--k-similar` | Tickets similares no RAG | `5` |
 | `--model` | Override do modelo LLM | env var |
-| `--no-references` | Desabilita tickets de referência | `False` |
 | `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | `medium` |
 | `-v, --verbose` | Logs detalhados no terminal | `False` |
 

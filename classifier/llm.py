@@ -1,4 +1,4 @@
-"""LLM classification module using OpenAI-compatible APIs."""
+"""LLM justification module using OpenAI-compatible APIs."""
 
 import os
 from dataclasses import dataclass
@@ -18,24 +18,17 @@ logger = get_logger("llm")
 
 RETRY_PROMPT = """Sua resposta anterior não está no formato JSON válido.
 Por favor, responda APENAS com JSON válido no formato:
-{"classe": "<categoria>", "justificativa": "<explicação>"}"""
-
-INVALID_CLASS_PROMPT_TEMPLATE = """O campo "classe" precisa ser UMA das seguintes categorias:
-{classes}
-
-Responda APENAS com JSON válido no formato:
-{{"classe": "<categoria>", "justificativa": "<explicação>"}}
-"""
+{"justificativa": "<explicação>"}"""
 
 
-class ClassificationError(Exception):
-    """Raised when classification fails after retries."""
+class JustificationError(Exception):
+    """Raised when justification fails after retries."""
 
     def __init__(self, ticket: str, reason: str, raw_response: str | None = None):
         self.ticket = ticket
         self.reason = reason
         self.raw_response = raw_response
-        super().__init__(f"Classification failed: {reason}")
+        super().__init__(f"Justification failed: {reason}")
 
 
 class ConclusionError(Exception):
@@ -46,10 +39,9 @@ class ConclusionError(Exception):
         super().__init__(f"Conclusion generation failed: {reason}")
 
 
-class ClassificationResult(BaseModel):
-    """Result of ticket classification."""
+class JustificationResult(BaseModel):
+    """Result of ticket justification."""
 
-    classe: str
     justificativa: str
 
 
@@ -71,10 +63,11 @@ class TokenUsage:
 
 
 @dataclass
-class ClassificationDetails:
-    """Complete details of a classification including prompts used."""
+class JustificationDetails:
+    """Complete details of a justification including prompts used."""
 
-    result: ClassificationResult
+    predicted_class: str
+    result: JustificationResult
     system_prompt: str
     user_prompt: str
     similar_tickets: list[dict]
@@ -83,8 +76,8 @@ class ClassificationDetails:
     reasoning: str | None = None  # LLM reasoning/thinking process
 
 
-class TicketClassifier:
-    """Classifies tickets using LLM with RAG context."""
+class TicketJustifier:
+    """Generates justifications using LLM with RAG context."""
 
     model: str
     seed: int | None
@@ -110,30 +103,30 @@ class TicketClassifier:
     def call_llm(
         self,
         ticket: str,
+        predicted_class: str,
         system_prompt: str,
         user_prompt: str,
         similar_tickets: list[dict],
-        valid_classes: list[str] | None = None,
         max_retries: int = 1,
         reasoning_effort: str | None = None,
-    ) -> ClassificationDetails:
+    ) -> JustificationDetails:
         """
         Call the LLM with pre-built prompts.
 
         Args:
             ticket: The ticket text (for error reporting)
+            predicted_class: Class assigned by the ML classifier
             system_prompt: Pre-built system prompt
             user_prompt: Pre-built user prompt
             similar_tickets: List of similar tickets (for result metadata)
-            valid_classes: Optional list of valid class names to enforce
             max_retries: Number of retries if JSON parsing fails
             reasoning_effort: Reasoning effort level (low/medium/high) or None to disable
 
         Returns:
-            ClassificationDetails with result, prompts, and metadata
+            JustificationDetails with result, prompts, and metadata
 
         Raises:
-            ClassificationError: If classification fails after all retries
+            JustificationError: If justification fails after all retries
         """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -147,7 +140,7 @@ class TicketClassifier:
         last_failure_reason: str | None = None
 
         for attempt in range(max_retries + 1):
-            logger.debug(f"Classification attempt {attempt + 1}/{max_retries + 1}")
+            logger.debug(f"Justification attempt {attempt + 1}/{max_retries + 1}")
             try:
                 # Build request kwargs
                 request_kwargs = {
@@ -178,14 +171,14 @@ class TicketClassifier:
                 response = self.client.chat.completions.create(**request_kwargs)
             except APITimeoutError as e:
                 logger.error("API timeout - LLM took too long to respond")
-                raise ClassificationError(
+                raise JustificationError(
                     ticket=ticket[:100],
                     reason="API timeout - LLM took too long to respond",
                     raw_response=None,
                 ) from e
             except APIError as e:
                 logger.error(f"API error: {e.message}")
-                raise ClassificationError(
+                raise JustificationError(
                     ticket=ticket[:100],
                     reason=f"API error: {e.message}",
                     raw_response=None,
@@ -234,40 +227,10 @@ class TicketClassifier:
                 logger.debug(f"Reasoning captured: {len(last_reasoning)} chars")
 
             try:
-                result = ClassificationResult.model_validate_json(last_content)
-                result.classe = result.classe.strip()
-
-                if valid_classes:
-                    canonical_by_lower = {c.lower(): c for c in valid_classes}
-                    canonical = canonical_by_lower.get(result.classe.lower())
-
-                    if canonical is None:
-                        retries_used += 1
-                        logger.warning(
-                            f"Invalid class '{result.classe}', retry {retries_used}"
-                        )
-                        last_failure_reason = (
-                            f"Invalid class '{result.classe}' not in allowed categories"
-                        )
-                        if attempt < max_retries:
-                            messages.append(
-                                {"role": "assistant", "content": last_content}
-                            )
-                            classes_formatted = "\n".join(f"- {c}" for c in valid_classes)
-                            messages.append(
-                                {
-                                    "role": "user",
-                                    "content": INVALID_CLASS_PROMPT_TEMPLATE.format(
-                                        classes=classes_formatted
-                                    ),
-                                }
-                            )
-                            continue
-                        break
-
-                    result.classe = canonical
-                logger.debug(f"Classification successful: {result.classe}")
-                return ClassificationDetails(
+                result = JustificationResult.model_validate_json(last_content)
+                logger.debug("Justification successful")
+                return JustificationDetails(
+                    predicted_class=predicted_class,
                     result=result,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -288,48 +251,46 @@ class TicketClassifier:
                     break
 
         # All retries exhausted
-        logger.error(f"Classification failed after {retries_used} retries")
-        raise ClassificationError(
+        logger.error(f"Justification failed after {retries_used} retries")
+        raise JustificationError(
             ticket=ticket[:100],
             reason=last_failure_reason or "Invalid response after retries",
             raw_response=last_content,
         )
 
-    def classify(
+    def justify(
         self,
         ticket: str,
+        predicted_class: str,
         similar_tickets: list[dict],
-        classes: list[str],
-        reference_tickets: dict[str, dict] | None = None,
         max_retries: int = 1,
         reasoning_effort: str | None = None,
-    ) -> ClassificationDetails:
+    ) -> JustificationDetails:
         """
-        Classify a ticket using LLM (convenience method that builds prompts).
+        Generate a justification for a classified ticket.
 
         Args:
-            ticket: The ticket text to classify
+            ticket: The ticket text to justify
+            predicted_class: Class assigned by the ML classifier
             similar_tickets: List of similar tickets from retriever
-            classes: List of valid class names
-            reference_tickets: Dict of representative tickets per class (optional)
             max_retries: Number of retries if JSON parsing fails
             reasoning_effort: Reasoning effort level (low/medium/high) or None
 
         Returns:
-            ClassificationDetails with result, prompts, and metadata
+            JustificationDetails with result, prompts, and metadata
 
         Raises:
-            ClassificationError: If classification fails after all retries
+            JustificationError: If justification fails after all retries
         """
-        logger.debug("Building prompts for classification")
-        system = build_system_prompt(classes)
-        user = build_user_prompt(ticket, similar_tickets, reference_tickets)
+        logger.debug("Building prompts for justification")
+        system = build_system_prompt()
+        user = build_user_prompt(ticket, predicted_class, similar_tickets)
         return self.call_llm(
             ticket=ticket,
+            predicted_class=predicted_class,
             system_prompt=system,
             user_prompt=user,
             similar_tickets=similar_tickets,
-            valid_classes=classes,
             max_retries=max_retries,
             reasoning_effort=reasoning_effort,
         )

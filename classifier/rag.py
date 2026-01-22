@@ -1,4 +1,4 @@
-"""RAG (Retrieval Augmented Generation) module for ticket classification."""
+"""RAG (Retrieval Augmented Generation) module for ticket retrieval/evidence."""
 
 import numpy as np
 import pandas as pd

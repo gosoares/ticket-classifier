@@ -11,7 +11,7 @@ from classifier.runner import run_evaluation
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="IT Service Ticket Classifier - Evaluate RAG-based classification",
+        description="IT Service Ticket Classifier - Evaluate ML classification + LLM justification",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -58,12 +58,6 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--no-references",
-        action="store_true",
-        help="Disable reference tickets (one per class) in prompts",
-    )
-
-    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -93,14 +87,13 @@ def main() -> int:
             k_similar=args.k_similar,
             random_state=args.random_state,
             model=args.model,
-            use_references=not args.no_references,
             verbose=args.verbose,
             reasoning_effort=args.reasoning,
         )
 
         # Print summary to stdout
         print("\n" + "=" * 60)
-        print("EVALUATION SUMMARY")
+        print("EVALUATION SUMMARY (VALIDATION SET)")
         print("=" * 60)
         print(f"Total tickets:  {result['total']}")
         print(f"Correct:        {result['correct']}")
