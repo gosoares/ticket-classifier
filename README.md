@@ -1,11 +1,14 @@
 # IT Service Ticket Classification
 
-Sistema de classificação automática de tickets de suporte de TI com ML (TF-IDF + LinearSVC) e RAG para **justificativas** via LLM.
+Sistema de classificação automática de tickets de suporte de TI com ML (TF-IDF + LinearSVC) e geração de **justificativas**:
+
+- **Linear (padrão):** determinístico, rápido e sem dependência de LLM
+- **LLM + RAG (opcional):** justificativas em linguagem natural condicionadas a evidências recuperadas
 
 ## Objetivo
 
 - **Entrada:** texto do ticket (string)
-- **Saída:** `{"classe": "...", "justificativa": "..."}` (classe vem do ML, justificativa do LLM)
+- **Saída:** `{"classe": "...", "justificativa": "..."}` (classe vem do ML; justificativa pode ser linear ou via LLM)
 
 O sistema classifica tickets em 8 categorias e fornece uma justificativa explicando o motivo da classificação.
 
@@ -19,7 +22,7 @@ O sistema classifica tickets em 8 categorias e fornece uma justificativa explica
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/) (package manager)
-- Um provider LLM compatível com OpenAI (recomendado: Ollama local)
+- Provider LLM compatível com OpenAI (**opcional**, apenas se usar justificativa com LLM)
 
 ## Instalação
 
@@ -29,7 +32,7 @@ cd ticket-classifier
 uv sync
 ```
 
-## Configuração
+## Configuração (somente se usar LLM)
 
 ### 1. Criar arquivo `.env`
 
@@ -44,7 +47,7 @@ cp .env.example .env
 | `LLM_BASE_URL` | URL da API | `http://localhost:11434/v1` |
 | `LLM_MODEL` | Nome do modelo | `gemma2:2b` |
 | `LLM_API_KEY` | Chave da API | `ollama` |
-| `LLM_REASONING_EFFORT` | Nível de reasoning (padrão: `medium`) | `low`, `medium`, `high`, ou vazio para desativar |
+| `LLM_REASONING_EFFORT` | Nível de reasoning (padrão: desativado) | `low`, `medium`, `high`, ou vazio para desativar |
 
 **Critérios do modelo escolhido (padrão):**
 - Gratuito e local (Ollama)
@@ -79,7 +82,7 @@ LLM_MODEL=gpt-4o-mini
 ### Via CLI
 
 ```bash
-# Execução padrão (reasoning opcional)
+# Execução padrão (justificativa linear, sem LLM)
 uv run python main.py
 
 # Ver todas as opções
@@ -88,8 +91,11 @@ uv run python main.py --help
 # Execução com parâmetros customizados
 uv run python main.py -v --test-size 200 --k-similar 5
 
-# Desabilitar reasoning (menor uso de tokens/latência)
-uv run python main.py --reasoning ""
+# Usar LLM para justificativa (requer .env configurado)
+uv run python main.py --justification llm
+
+# Override do modelo LLM (opcional)
+uv run python main.py --justification llm --model "gpt-4o-mini"
 ```
 
 **Opções CLI:**
@@ -100,8 +106,9 @@ uv run python main.py --reasoning ""
 | `--output` | Diretório de saída | `output` |
 | `--test-size` | Número de tickets de validação (balanceado) | `200` |
 | `--k-similar` | Tickets similares no RAG | `5` |
+| `--justification` | Método de justificativa (`linear`/`llm`) | `linear` |
 | `--model` | Override do modelo LLM | env var |
-| `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | `medium` |
+| `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | env var |
 | `-v, --verbose` | Logs detalhados no terminal | `False` |
 
 Observação: apesar do nome `--test-size`, o pipeline atual separa o dataset em **treino/teste/validação** e usa o conjunto
@@ -120,7 +127,7 @@ Arquivos gerados em `output/`:
 
 | Arquivo | Conteúdo |
 |---------|----------|
-| `classifications.json` | Classificações detalhadas com justificativas e reasoning |
+| `classifications.json` | Classificações detalhadas com justificativas (linear ou LLM) |
 | `metrics.json` | Métricas no conjunto de validação |
 | `run.log` | Log de execução |
 

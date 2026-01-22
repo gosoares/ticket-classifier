@@ -9,11 +9,15 @@ from tqdm import tqdm
 
 from classifier.config import (
     EMBEDDING_MODEL,
+    JUSTIFICATION,
     K_SIMILAR,
     RANDOM_STATE,
     REASONING_EFFORT,
     VALIDATION_SIZE,
 )
+from classifier.features import TfidfFeatureExtractor
+from classifier.graph import create_graph, run_pipeline
+from classifier.justifiers import JustificationError, LinearJustifier, LlmJustifier
 from classifier.conclusion import (
     build_conclusion_payload,
     build_conclusion_system_prompt,
@@ -21,54 +25,24 @@ from classifier.conclusion import (
 )
 from classifier.classifiers import TfidfClassifier
 from classifier.data import load_dataset, train_test_validation_split
-from classifier.graph import justify_ticket
-from classifier.llm import (
-    JustificationError,
-    ConclusionError,
-    TicketJustifier,
-    TokenUsage,
-)
+from classifier.llm import ConclusionError, LlmClient
 from classifier.logging_config import get_logger, setup_logging
 from classifier.metrics import evaluate
 from classifier.rag import TicketRetriever
+from classifier.schemas import TokenUsage
 
 logger = get_logger("runner")
 
 
 def classify_batch(
     test_df: pd.DataFrame,
-    retriever: TicketRetriever,
-    justifier: TicketJustifier,
-    ml_classifier: TfidfClassifier,
-    classes: list[str],
-    k_similar: int = K_SIMILAR,
-    reasoning_effort: str | None = REASONING_EFFORT,
+    pipeline,
     show_progress: bool = True,
 ) -> tuple[list[dict], list[dict], TokenUsage]:
-    """
-    Generate justifications for a batch using ML predictions.
-
-    Args:
-        test_df: DataFrame with 'Document' and 'Topic_group' columns
-        retriever: Indexed TicketRetriever instance
-        justifier: TicketJustifier instance
-        ml_classifier: Trained TF-IDF classifier
-        reasoning_effort: Reasoning effort level (low/medium/high) or None
-        show_progress: Whether to show progress bar
-
-    Returns:
-        Tuple of (classifications, errors, total_tokens)
-        - classifications: List of dicts with ticket, true_class, predicted_class,
-          justification, reasoning, correct, system_prompt, user_prompt,
-          similar_tickets, retries, token_usage
-        - errors: List of dicts with ticket, true_class, reason, raw_response
-        - total_tokens: TokenUsage with aggregated token counts
-    """
-    classifications = []
-    errors = []
-    y_true = []
-    y_pred = []
-    total_tokens = TokenUsage(0, 0, 0)
+    """Generate predicted classes and justifications for a batch of tickets."""
+    classifications: list[dict] = []
+    errors: list[dict] = []
+    total_tokens = TokenUsage()
 
     pbar = tqdm(
         test_df.iterrows(),
@@ -76,55 +50,16 @@ def classify_batch(
         desc="Justifying",
         disable=not show_progress,
     )
+
     for _, row in pbar:
         ticket_text = row["Document"]
         true_label = row["Topic_group"]
 
         try:
-            details = justify_ticket(
-                ticket=ticket_text,
-                retriever=retriever,
-                justifier=justifier,
-                ml_classifier=ml_classifier,
-                reasoning_effort=reasoning_effort,
-                k_similar=k_similar,
-            )
-
-            y_true.append(true_label)
-            predicted_label = details.predicted_class
-            y_pred.append(predicted_label)
-
-            # Accumulate token usage
-            total_tokens = total_tokens + details.token_usage
-
-            # Update progress bar with last result
-            is_correct = true_label == predicted_label
-            if show_progress:
-                pbar.set_postfix(pred=predicted_label, ok=is_correct)
-
-            classifications.append(
-                {
-                    "ticket": ticket_text,
-                    "true_class": true_label,
-                    "predicted_class": predicted_label,
-                    "justification": details.result.justificativa,
-                    "reasoning": details.reasoning,
-                    "correct": is_correct,
-                    "system_prompt": details.system_prompt,
-                    "user_prompt": details.user_prompt,
-                    "similar_tickets": details.similar_tickets,
-                    "retries": details.retries,
-                    "token_usage": {
-                        "prompt_tokens": details.token_usage.prompt_tokens,
-                        "completion_tokens": details.token_usage.completion_tokens,
-                        "total_tokens": details.token_usage.total_tokens,
-                    },
-                }
-            )
-
+            details = run_pipeline(pipeline, ticket=ticket_text)
         except JustificationError as e:
             if show_progress:
-                pbar.set_postfix(error=e.reason[:20])
+                pbar.set_postfix(error=(e.reason or "")[:20])
             errors.append(
                 {
                     "ticket": ticket_text,
@@ -133,6 +68,41 @@ def classify_batch(
                     "raw_response": e.raw_response,
                 }
             )
+            continue
+
+        predicted_label = details.predicted_class
+        is_correct = true_label == predicted_label
+        total_tokens = total_tokens + details.token_usage
+
+        if show_progress:
+            pbar.set_postfix(
+                pred=predicted_label,
+                ok=is_correct,
+                just=details.justification_source,
+            )
+
+        classifications.append(
+            {
+                "ticket": ticket_text,
+                "true_class": true_label,
+                "predicted_class": predicted_label,
+                "classe": predicted_label,
+                "justification": details.result.justificativa,
+                "justification_source": details.justification_source,
+                "evidence_terms": details.evidence_terms,
+                "reasoning": details.reasoning,
+                "correct": is_correct,
+                "system_prompt": details.system_prompt,
+                "user_prompt": details.user_prompt,
+                "similar_tickets": details.similar_tickets,
+                "retries": details.retries,
+                "token_usage": {
+                    "prompt_tokens": details.token_usage.prompt_tokens,
+                    "completion_tokens": details.token_usage.completion_tokens,
+                    "total_tokens": details.token_usage.total_tokens,
+                },
+            }
+        )
 
     return classifications, errors, total_tokens
 
@@ -146,6 +116,7 @@ def run_evaluation(
     model: str | None = None,
     verbose: bool = False,
     reasoning_effort: str | None = REASONING_EFFORT,
+    justification: str = JUSTIFICATION,
 ) -> dict:
     """
     Execute the full evaluation pipeline.
@@ -153,8 +124,8 @@ def run_evaluation(
     Steps:
     1. Load dataset and split into train/test/validation
     2. Train ML classifier
-    3. Index training tickets for RAG retrieval
-    4. Generate justifications
+    3. Configure justifier (linear by default, LLM optional)
+    4. Build pipeline and generate justifications
     5. Calculate evaluation metrics
     6. Save results to output files
 
@@ -167,6 +138,7 @@ def run_evaluation(
         model: LLM model name (from LLM_MODEL env var if not specified)
         verbose: Enable verbose logging to terminal
         reasoning_effort: Reasoning effort level (low/medium/high) or None
+        justification: Justification method ("linear" or "llm")
 
     Returns:
         Dict with metrics and output file paths
@@ -188,6 +160,7 @@ def run_evaluation(
     logger.info(f"Model: {model}")
     logger.info(f"Reasoning effort: {reasoning_effort}")
     logger.info(f"Random state: {random_state}")
+    logger.info(f"Justification: {justification}")
 
     # Step 1: Load and split data
     logger.info("-" * 60)
@@ -202,29 +175,49 @@ def run_evaluation(
     # Step 2: Train ML classifier
     logger.info("-" * 60)
     logger.info("Step 2: Training ML classifier")
-    ml_classifier = TfidfClassifier.linear_svc(random_state=random_state)
+    features = TfidfFeatureExtractor()
+    ml_classifier = TfidfClassifier.linear_svc(
+        random_state=random_state,
+        features=features,
+    )
     ml_classifier.fit(train_df)
     logger.info("ML classifier trained")
 
-    # Step 3: Index training data
+    # Step 3: Configure justifier
     logger.info("-" * 60)
-    logger.info("Step 3: Indexing training data for RAG")
-    retriever = TicketRetriever()
-    retriever.index(train_df)
+    llm_client = None
+    if justification == "linear":
+        logger.info("Step 3: Using linear justifications (default)")
+        justifier = LinearJustifier(
+            ml_classifier.classifier.coef_,
+            ml_classifier.classifier.classes_,
+            features,
+        )
+    elif justification == "llm":
+        logger.info("Step 3: Using LLM justifications with RAG (optional)")
+        retriever = TicketRetriever()
+        retriever.index(train_df)
+        llm_client = LlmClient(model=model, seed=random_state)
+        justifier = LlmJustifier(
+            llm_client,
+            retriever,
+            k_similar=k_similar,
+            reasoning_effort=reasoning_effort,
+        )
+    else:
+        raise ValueError("justification must be 'linear' or 'llm'")
 
-    # Step 4: Generate justifications
+    # Step 4: Build pipeline and justify
     logger.info("-" * 60)
-    logger.info("Step 4: Generating justifications with RAG + LLM (validation)")
-    justifier = TicketJustifier(model=model, seed=random_state)
+    logger.info("Step 4: Building pipeline and generating justifications")
+    pipeline = create_graph(
+        classifier=ml_classifier,
+        justifier=justifier,
+    )
 
     classifications, errors, total_tokens = classify_batch(
         test_df=validation_df,
-        retriever=retriever,
-        justifier=justifier,
-        ml_classifier=ml_classifier,
-        classes=classes,
-        k_similar=k_similar,
-        reasoning_effort=reasoning_effort,
+        pipeline=pipeline,
         show_progress=True,
     )
 
@@ -264,6 +257,7 @@ def run_evaluation(
             "model": model,
             "reasoning_effort": reasoning_effort,
             "random_state": random_state,
+            "justification": justification,
         },
         "summary": {
             "total": len(validation_df),
@@ -320,55 +314,58 @@ def run_evaluation(
     conclusion_path = None
     conclusion_payload = None
     conclusion_token_usage = None
-    try:
-        conclusion_payload = build_conclusion_payload(
-            dataset=str(dataset_path),
-            classes=classes,
-            test_size=len(validation_df),
-            k_similar=k_similar,
-            embedding_model=EMBEDDING_MODEL,
-            llm_model=justifier.model,
-            random_state=random_state,
-            classifications=classifications,
-            errors=errors,
-            metrics=metrics,
-            token_usage=total_tokens,
-            max_misclassified=20,
-            timestamp=timestamp,
-        )
-        system_prompt = build_conclusion_system_prompt()
-        user_prompt = build_conclusion_user_prompt(conclusion_payload)
-        conclusion_text, conclusion_token_usage = justifier.generate_conclusion(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
-
-        conclusion_path = output_path / "conclusion.json"
-        with open(conclusion_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "metadata": {
-                        "timestamp": timestamp,
-                        "dataset": str(dataset_path),
-                        "model": justifier.model,
-                    },
-                    "payload": conclusion_payload,
-                    "conclusion": conclusion_text,
-                    "token_usage": {
-                        "prompt_tokens": conclusion_token_usage.prompt_tokens,
-                        "completion_tokens": conclusion_token_usage.completion_tokens,
-                        "total_tokens": conclusion_token_usage.total_tokens,
-                    }
-                    if conclusion_token_usage
-                    else None,
-                },
-                f,
-                indent=2,
-                ensure_ascii=False,
+    if llm_client is None:
+        logger.info("Skipping conclusion generation (LLM not in use)")
+    else:
+        try:
+            conclusion_payload = build_conclusion_payload(
+                dataset=str(dataset_path),
+                classes=classes,
+                test_size=len(validation_df),
+                k_similar=k_similar,
+                embedding_model=EMBEDDING_MODEL,
+                llm_model=llm_client.model,
+                random_state=random_state,
+                classifications=classifications,
+                errors=errors,
+                metrics=metrics,
+                token_usage=total_tokens,
+                max_misclassified=20,
+                timestamp=timestamp,
             )
-        logger.info(f"Saved conclusion to {conclusion_path}")
-    except ConclusionError as e:
-        logger.error(f"Conclusion generation failed: {e.reason}")
+            system_prompt = build_conclusion_system_prompt()
+            user_prompt = build_conclusion_user_prompt(conclusion_payload)
+            conclusion_text, conclusion_token_usage = llm_client.generate_conclusion(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+
+            conclusion_path = output_path / "conclusion.json"
+            with open(conclusion_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "metadata": {
+                            "timestamp": timestamp,
+                            "dataset": str(dataset_path),
+                            "model": llm_client.model,
+                        },
+                        "payload": conclusion_payload,
+                        "conclusion": conclusion_text,
+                        "token_usage": {
+                            "prompt_tokens": conclusion_token_usage.prompt_tokens,
+                            "completion_tokens": conclusion_token_usage.completion_tokens,
+                            "total_tokens": conclusion_token_usage.total_tokens,
+                        }
+                        if conclusion_token_usage
+                        else None,
+                    },
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            logger.info(f"Saved conclusion to {conclusion_path}")
+        except ConclusionError as e:
+            logger.error(f"Conclusion generation failed: {e.reason}")
 
     # Summary
     logger.info("=" * 60)

@@ -8,12 +8,11 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.svm import LinearSVC
 
 from classifier.config import EMBEDDING_MODEL, K_SIMILAR, RANDOM_STATE
+from classifier.features import TfidfFeatureExtractor
 from classifier.rag import TicketRetriever
 
 
@@ -30,58 +29,53 @@ class Classifier(Protocol):
 class TfidfClassifier:
     """TF-IDF + linear classifier."""
 
-    def __init__(self, classifier) -> None:
+    def __init__(
+        self,
+        classifier,
+        *,
+        features: TfidfFeatureExtractor | None = None,
+    ) -> None:
         self.classifier = classifier
+        self.features = features or TfidfFeatureExtractor()
         self.name = f"TF-IDF + {classifier.__class__.__name__}"
-        self.model: Pipeline | None = None
+        self._fitted = False
 
     def fit(self, train_df: pd.DataFrame) -> None:
-        features = self._build_tfidf_features()
-        model = Pipeline(
-            [
-                ("features", features),
-                ("classifier", self.classifier),
-            ]
-        )
-        model.fit(train_df["Document"].tolist(), train_df["Topic_group"].tolist())
-        self.model = model
+        texts = train_df["Document"].tolist()
+        labels = train_df["Topic_group"].tolist()
+        self.features.fit(texts)
+        X = self.features.transform(texts)
+        self.classifier.fit(X, labels)
+        self._fitted = True
 
     def predict(self, texts: list[str]) -> list[str]:
-        if self.model is None:
+        if not self._fitted:
             raise ValueError("Model not fitted. Call fit() first.")
-        return self.model.predict(texts).tolist()
-
-    def _build_tfidf_features(self) -> FeatureUnion:
-        """Create a combined word + character TF-IDF feature extractor."""
-        word_tfidf = TfidfVectorizer(
-            analyzer="word",
-            ngram_range=(1, 2),
-            min_df=2,
-            max_features=120_000,
-            strip_accents="unicode",
-        )
-        char_tfidf = TfidfVectorizer(
-            analyzer="char_wb",
-            ngram_range=(3, 5),
-            min_df=2,
-            max_features=60_000,
-            strip_accents="unicode",
-        )
-        return FeatureUnion([("word", word_tfidf), ("char", char_tfidf)])
+        X = self.features.transform(texts)
+        return self.classifier.predict(X).tolist()
 
     @classmethod
     def linear_svc(
-        cls, random_state: int = RANDOM_STATE, verbose: int = 0
+        cls,
+        random_state: int = RANDOM_STATE,
+        verbose: int = 0,
+        *,
+        features: TfidfFeatureExtractor | None = None,
     ) -> "TfidfClassifier":
         return cls(
             LinearSVC(
                 class_weight="balanced", random_state=random_state, verbose=verbose
-            )
+            ),
+            features=features,
         )
 
     @classmethod
     def logistic_regression(
-        cls, random_state: int = RANDOM_STATE, verbose: int = 0
+        cls,
+        random_state: int = RANDOM_STATE,
+        verbose: int = 0,
+        *,
+        features: TfidfFeatureExtractor | None = None,
     ) -> "TfidfClassifier":
         return cls(
             LogisticRegression(
@@ -90,12 +84,17 @@ class TfidfClassifier:
                 class_weight="balanced",
                 random_state=random_state,
                 verbose=verbose,
-            )
+            ),
+            features=features,
         )
 
     @classmethod
     def sgd_classifier(
-        cls, random_state: int = RANDOM_STATE, verbose: int = 0
+        cls,
+        random_state: int = RANDOM_STATE,
+        verbose: int = 0,
+        *,
+        features: TfidfFeatureExtractor | None = None,
     ) -> "TfidfClassifier":
         return cls(
             SGDClassifier(
@@ -105,7 +104,8 @@ class TfidfClassifier:
                 class_weight="balanced",
                 random_state=random_state,
                 verbose=verbose,
-            )
+            ),
+            features=features,
         )
 
 

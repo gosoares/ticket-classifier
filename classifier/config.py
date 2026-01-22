@@ -19,3 +19,6 @@ RANDOM_STATE = 123  # Seed para reprodutibilidade
 
 # LLM Reasoning (optional)
 REASONING_EFFORT: str | None = os.environ.get("LLM_REASONING_EFFORT") or None
+
+# Justification mode (can be overridden by CLI)
+JUSTIFICATION = os.environ.get("JUSTIFICATION", "linear")

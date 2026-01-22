@@ -4,14 +4,20 @@
 import argparse
 import sys
 
-from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, VALIDATION_SIZE
+from classifier.config import (
+    JUSTIFICATION,
+    K_SIMILAR,
+    RANDOM_STATE,
+    REASONING_EFFORT,
+    VALIDATION_SIZE,
+)
 from classifier.runner import run_evaluation
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="IT Service Ticket Classifier - Evaluate ML classification + LLM justification",
+        description="IT Service Ticket Classifier - Evaluate ML classification + justifications (linear by default, optional LLM)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -72,6 +78,14 @@ def parse_args() -> argparse.Namespace:
         help="Enable LLM reasoning with specified effort level",
     )
 
+    parser.add_argument(
+        "--justification",
+        type=str,
+        default=JUSTIFICATION,
+        choices=["linear", "llm"],
+        help="How to produce justifications (linear is faster and avoids LLM dependency)",
+    )
+
     return parser.parse_args()
 
 
@@ -89,6 +103,7 @@ def main() -> int:
             model=args.model,
             verbose=args.verbose,
             reasoning_effort=args.reasoning,
+            justification=args.justification,
         )
 
         # Print summary to stdout

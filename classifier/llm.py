@@ -1,14 +1,15 @@
-"""LLM justification module using OpenAI-compatible APIs."""
+"""LLM client and prompts for justification and analysis."""
+
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from openai import APIError, APITimeoutError, OpenAI
-from pydantic import BaseModel, ValidationError
 
 from classifier.logging_config import get_logger
-from classifier.prompts import build_system_prompt, build_user_prompt
+from classifier.schemas import TokenUsage
 
 load_dotenv()
 
@@ -16,19 +17,97 @@ LLM_MODEL = os.environ.get("LLM_MODEL")
 
 logger = get_logger("llm")
 
-RETRY_PROMPT = """Sua resposta anterior não está no formato JSON válido.
-Por favor, responda APENAS com JSON válido no formato:
-{"justificativa": "<explicação>"}"""
+
+def build_system_prompt() -> str:
+    """
+    Gera o prompt do sistema para justificativa.
+
+    Returns:
+        Prompt formatado para o role "system"
+    """
+    return """Você é um assistente que gera justificativas para classificações de tickets de suporte de TI.
+
+Responda APENAS com JSON no formato:
+{"justificativa": "<explicação curta e objetiva de 1-3 frases>"}
+
+A justificativa deve ser escrita em **Português (Brasil)**.
+Use evidências do ticket e dos exemplos fornecidos para sustentar a classe informada.
+Não mencione tickets similares explicitamente (ex.: “ticket 2”).
+
+Regras:
+- A justificativa deve ser auto contida.
+- Não mencione tickets similares explicitamente (ex.: “ticket 2”).
+- Use apenas evidências gerais do conteúdo do ticket.
+- Cite explicitamente de 2 a 4 termos literais do ticket entre aspas simples (ex.: 'vpn', 'password', 'oracle').
+
+Responda APENAS com JSON no formato:
+{{"justificativa": "<explicação curta e objetiva de 1-3 frases>"}}"""
 
 
-class JustificationError(Exception):
-    """Raised when justification fails after retries."""
+def _format_similar_tickets(tickets: list[dict]) -> str:
+    """
+    Formata tickets similares para o prompt.
 
-    def __init__(self, ticket: str, reason: str, raw_response: str | None = None):
-        self.ticket = ticket
+    Args:
+        tickets: Lista de dicts com 'text', 'class', 'score'
+
+    Returns:
+        String formatada com tickets numerados
+    """
+    if not tickets:
+        return "(nenhum ticket similar encontrado)"
+
+    lines = []
+    for i, t in enumerate(tickets, 1):
+        lines.append(f"{i}. [{t['class']}] {t['text']}")
+
+    return "\n".join(lines)
+
+
+def build_user_prompt(
+    ticket: str,
+    predicted_class: str,
+    similar_tickets: list[dict],
+) -> str:
+    """
+    Gera o prompt do usuário para justificativa.
+
+    Args:
+        ticket: Texto do ticket a classificar
+        predicted_class: Classe já definida pelo classificador
+        similar_tickets: Lista de tickets similares do RAG
+
+    Returns:
+        Prompt formatado para o role "user"
+    """
+    prompt = f"""Gere uma justificativa para a classificação abaixo.
+
+**Classe atribuída:** {predicted_class}
+
+**Ticket:**
+{ticket}
+
+## Tickets Similares (como evidência)
+{_format_similar_tickets(similar_tickets)}"""
+
+    return prompt
+
+
+@dataclass(frozen=True, slots=True)
+class LlmResponse:
+    """Result of a single LLM call."""
+
+    content: str
+    reasoning: str | None
+    token_usage: TokenUsage
+
+
+class LlmError(Exception):
+    """Raised when an LLM request fails."""
+
+    def __init__(self, reason: str):
         self.reason = reason
-        self.raw_response = raw_response
-        super().__init__(f"Justification failed: {reason}")
+        super().__init__(f"LLM call failed: {reason}")
 
 
 class ConclusionError(Exception):
@@ -39,45 +118,8 @@ class ConclusionError(Exception):
         super().__init__(f"Conclusion generation failed: {reason}")
 
 
-class JustificationResult(BaseModel):
-    """Result of ticket justification."""
-
-    justificativa: str
-
-
-@dataclass
-class TokenUsage:
-    """Token usage from LLM API calls."""
-
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-
-    def __add__(self, other: "TokenUsage") -> "TokenUsage":
-        """Sum token usage from multiple calls (e.g., retries)."""
-        return TokenUsage(
-            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
-            completion_tokens=self.completion_tokens + other.completion_tokens,
-            total_tokens=self.total_tokens + other.total_tokens,
-        )
-
-
-@dataclass
-class JustificationDetails:
-    """Complete details of a justification including prompts used."""
-
-    predicted_class: str
-    result: JustificationResult
-    system_prompt: str
-    user_prompt: str
-    similar_tickets: list[dict]
-    retries: int
-    token_usage: TokenUsage
-    reasoning: str | None = None  # LLM reasoning/thinking process
-
-
-class TicketJustifier:
-    """Generates justifications using LLM with RAG context."""
+class LlmClient:
+    """Wrapper around OpenAI-compatible APIs."""
 
     model: str
     seed: int | None
@@ -97,202 +139,91 @@ class TicketJustifier:
         self.client = OpenAI(
             base_url=base_url or os.environ.get("LLM_BASE_URL"),
             api_key=api_key or os.environ.get("LLM_API_KEY"),
-            timeout=20.0,  # timeout to prevent hanging
+            timeout=20.0,
         )
 
-    def call_llm(
+    def chat(
         self,
-        ticket: str,
-        predicted_class: str,
-        system_prompt: str,
-        user_prompt: str,
-        similar_tickets: list[dict],
-        max_retries: int = 1,
+        messages: list[dict[str, str]],
+        *,
+        response_format: dict | None = None,
         reasoning_effort: str | None = None,
-    ) -> JustificationDetails:
+    ) -> LlmResponse:
         """
-        Call the LLM with pre-built prompts.
+        Execute a chat completion call and return the raw response.
 
         Args:
-            ticket: The ticket text (for error reporting)
-            predicted_class: Class assigned by the ML classifier
-            system_prompt: Pre-built system prompt
-            user_prompt: Pre-built user prompt
-            similar_tickets: List of similar tickets (for result metadata)
-            max_retries: Number of retries if JSON parsing fails
-            reasoning_effort: Reasoning effort level (low/medium/high) or None to disable
-
-        Returns:
-            JustificationDetails with result, prompts, and metadata
-
-        Raises:
-            JustificationError: If justification fails after all retries
-        """
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        last_content = ""
-        last_reasoning = None
-        retries_used = 0
-        total_usage = TokenUsage(0, 0, 0)
-        last_failure_reason: str | None = None
-
-        for attempt in range(max_retries + 1):
-            logger.debug(f"Justification attempt {attempt + 1}/{max_retries + 1}")
-            try:
-                # Build request kwargs
-                request_kwargs = {
-                    "model": self.model,
-                    "messages": messages,
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.0,  # Deterministic output
-                }
-                # Add seed if specified for additional determinism
-                if self.seed is not None:
-                    request_kwargs["seed"] = self.seed
-                    logger.debug(f"Using seed for deterministic output: {self.seed}")
-                # Add reasoning parameter if specified
-                # MiMo uses "enabled" while others use "effort"
-                if reasoning_effort:
-                    is_mimo = self.model and "mimo" in self.model.lower()
-                    if is_mimo:
-                        request_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
-                        logger.debug("Using MiMo reasoning format (enabled)")
-                    else:
-                        request_kwargs["extra_body"] = {
-                            "reasoning": {"effort": reasoning_effort}
-                        }
-                        logger.debug(
-                            f"Using standard reasoning format (effort={reasoning_effort})"
-                        )
-
-                response = self.client.chat.completions.create(**request_kwargs)
-            except APITimeoutError as e:
-                logger.error("API timeout - LLM took too long to respond")
-                raise JustificationError(
-                    ticket=ticket[:100],
-                    reason="API timeout - LLM took too long to respond",
-                    raw_response=None,
-                ) from e
-            except APIError as e:
-                logger.error(f"API error: {e.message}")
-                raise JustificationError(
-                    ticket=ticket[:100],
-                    reason=f"API error: {e.message}",
-                    raw_response=None,
-                ) from e
-
-            # Accumulate token usage
-            if response.usage:
-                call_usage = TokenUsage(
-                    prompt_tokens=response.usage.prompt_tokens,
-                    completion_tokens=response.usage.completion_tokens,
-                    total_tokens=response.usage.total_tokens,
-                )
-                total_usage = total_usage + call_usage
-                logger.debug(
-                    f"Tokens used: {call_usage.total_tokens} "
-                    f"(prompt: {call_usage.prompt_tokens}, "
-                    f"completion: {call_usage.completion_tokens})"
-                )
-
-            message = response.choices[0].message
-            last_content = message.content or ""
-            logger.debug(f"LLM response: {last_content[:200]}...")
-
-            # Extract reasoning from response
-            # Try multiple formats: reasoning_details (standard), reasoning_content (MiMo)
-            last_reasoning = None
-
-            # Standard OpenRouter format
-            reasoning_details = getattr(message, "reasoning_details", None)
-            if reasoning_details:
-                reasoning_texts = [
-                    rd.get("text", "")
-                    if isinstance(rd, dict)
-                    else getattr(rd, "text", "")
-                    for rd in reasoning_details
-                ]
-                last_reasoning = "\n".join(reasoning_texts) if reasoning_texts else None
-
-            # MiMo format
-            if not last_reasoning:
-                reasoning_content = getattr(message, "reasoning_content", None)
-                if reasoning_content:
-                    last_reasoning = reasoning_content
-
-            if last_reasoning:
-                logger.debug(f"Reasoning captured: {len(last_reasoning)} chars")
-
-            try:
-                result = JustificationResult.model_validate_json(last_content)
-                logger.debug("Justification successful")
-                return JustificationDetails(
-                    predicted_class=predicted_class,
-                    result=result,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    similar_tickets=similar_tickets,
-                    retries=retries_used,
-                    token_usage=total_usage,
-                    reasoning=last_reasoning,
-                )
-            except ValidationError:
-                retries_used += 1
-                last_failure_reason = "Invalid JSON or missing required fields"
-                logger.warning(f"Invalid JSON response, retry {retries_used}")
-                if attempt < max_retries:
-                    # Add assistant response and retry prompt to continue conversation
-                    messages.append({"role": "assistant", "content": last_content})
-                    messages.append({"role": "user", "content": RETRY_PROMPT})
-                else:
-                    break
-
-        # All retries exhausted
-        logger.error(f"Justification failed after {retries_used} retries")
-        raise JustificationError(
-            ticket=ticket[:100],
-            reason=last_failure_reason or "Invalid response after retries",
-            raw_response=last_content,
-        )
-
-    def justify(
-        self,
-        ticket: str,
-        predicted_class: str,
-        similar_tickets: list[dict],
-        max_retries: int = 1,
-        reasoning_effort: str | None = None,
-    ) -> JustificationDetails:
-        """
-        Generate a justification for a classified ticket.
-
-        Args:
-            ticket: The ticket text to justify
-            predicted_class: Class assigned by the ML classifier
-            similar_tickets: List of similar tickets from retriever
-            max_retries: Number of retries if JSON parsing fails
+            messages: Chat messages payload
+            response_format: Optional response format (e.g., {"type": "json_object"})
             reasoning_effort: Reasoning effort level (low/medium/high) or None
 
         Returns:
-            JustificationDetails with result, prompts, and metadata
+            LlmResponse with content, reasoning, and token usage
 
         Raises:
-            JustificationError: If justification fails after all retries
+            LlmError: If the API call fails
         """
-        logger.debug("Building prompts for justification")
-        system = build_system_prompt()
-        user = build_user_prompt(ticket, predicted_class, similar_tickets)
-        return self.call_llm(
-            ticket=ticket,
-            predicted_class=predicted_class,
-            system_prompt=system,
-            user_prompt=user,
-            similar_tickets=similar_tickets,
-            max_retries=max_retries,
-            reasoning_effort=reasoning_effort,
+        request_kwargs: dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.0,
+        }
+        if response_format:
+            request_kwargs["response_format"] = response_format
+        if self.seed is not None:
+            request_kwargs["seed"] = self.seed
+            logger.debug(f"Using seed for deterministic output: {self.seed}")
+        if reasoning_effort:
+            is_mimo = self.model and "mimo" in self.model.lower()
+            if is_mimo:
+                request_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+                logger.debug("Using MiMo reasoning format (enabled)")
+            else:
+                request_kwargs["extra_body"] = {
+                    "reasoning": {"effort": reasoning_effort}
+                }
+                logger.debug(
+                    f"Using standard reasoning format (effort={reasoning_effort})"
+                )
+
+        try:
+            response = self.client.chat.completions.create(**request_kwargs)
+        except APITimeoutError as e:
+            logger.error("API timeout - LLM took too long to respond")
+            raise LlmError("API timeout - LLM took too long to respond") from e
+        except APIError as e:
+            logger.error(f"API error: {e.message}")
+            raise LlmError(f"API error: {e.message}") from e
+
+        token_usage = TokenUsage(0, 0, 0)
+        if response.usage:
+            token_usage = TokenUsage(
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                total_tokens=response.usage.total_tokens,
+            )
+
+        message = response.choices[0].message if response.choices else None
+        content = message.content if message and message.content else ""
+
+        reasoning = None
+        reasoning_details = getattr(message, "reasoning_details", None)
+        if reasoning_details:
+            reasoning_texts = [
+                rd.get("text", "") if isinstance(rd, dict) else getattr(rd, "text", "")
+                for rd in reasoning_details
+            ]
+            reasoning = "\n".join(reasoning_texts) if reasoning_texts else None
+
+        if not reasoning:
+            reasoning_content = getattr(message, "reasoning_content", None)
+            if reasoning_content:
+                reasoning = reasoning_content
+
+        return LlmResponse(
+            content=content or "",
+            reasoning=reasoning,
+            token_usage=token_usage,
         )
 
     def generate_conclusion(
@@ -321,43 +252,15 @@ class TicketJustifier:
         ]
 
         try:
-            request_kwargs = {
-                "model": self.model,
-                "messages": messages,
-                "temperature": 0.0,
-            }
-
-            if self.seed is not None:
-                request_kwargs["seed"] = self.seed
-
-            if reasoning_effort:
-                is_mimo = self.model and "mimo" in self.model.lower()
-                if is_mimo:
-                    request_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
-                else:
-                    request_kwargs["extra_body"] = {
-                        "reasoning": {"effort": reasoning_effort}
-                    }
-
-            response = self.client.chat.completions.create(**request_kwargs)
-        except APITimeoutError as e:
-            logger.error("API timeout while generating conclusion")
-            raise ConclusionError("API timeout - LLM took too long to respond") from e
-        except APIError as e:
-            logger.error(f"API error while generating conclusion: {e.message}")
-            raise ConclusionError(f"API error: {e.message}") from e
-
-        token_usage = TokenUsage(0, 0, 0)
-        if response.usage:
-            token_usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                total_tokens=response.usage.total_tokens,
+            response = self.chat(
+                messages,
+                reasoning_effort=reasoning_effort,
             )
+        except LlmError as e:
+            raise ConclusionError(e.reason) from e
 
-        message = response.choices[0].message if response.choices else None
-        content = message.content.strip() if message and message.content else ""
+        content = response.content.strip()
         if not content:
             raise ConclusionError("Empty response from LLM")
 
-        return content, token_usage
+        return content, response.token_usage
