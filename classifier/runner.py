@@ -16,7 +16,6 @@ from classifier.config import (
     VALIDATION_SIZE,
 )
 from classifier.features import TfidfFeatureExtractor
-from classifier.graph import create_graph, run_pipeline
 from classifier.justifiers import JustificationError, LinearJustifier, LlmJustifier
 from classifier.conclusion import (
     build_conclusion_payload,
@@ -29,14 +28,26 @@ from classifier.llm import ConclusionError, LlmClient
 from classifier.logging_config import get_logger, setup_logging
 from classifier.metrics import evaluate
 from classifier.rag import TicketRetriever
-from classifier.schemas import TokenUsage
+from classifier.schemas import JustificationDetails, TokenUsage
 
 logger = get_logger("runner")
 
 
+def run_pipeline(
+    *,
+    ticket: str,
+    classifier,
+    justifier,
+) -> JustificationDetails:
+    """Classify a ticket and generate a justification."""
+    predicted_class = classifier.predict([ticket])[0]
+    return justifier.justify(ticket=ticket, predicted_class=predicted_class)
+
+
 def classify_batch(
     test_df: pd.DataFrame,
-    pipeline,
+    classifier,
+    justifier,
     show_progress: bool = True,
 ) -> tuple[list[dict], list[dict], TokenUsage]:
     """Generate predicted classes and justifications for a batch of tickets."""
@@ -56,7 +67,11 @@ def classify_batch(
         true_label = row["Topic_group"]
 
         try:
-            details = run_pipeline(pipeline, ticket=ticket_text)
+            details = run_pipeline(
+                ticket=ticket_text,
+                classifier=classifier,
+                justifier=justifier,
+            )
         except JustificationError as e:
             if show_progress:
                 pbar.set_postfix(error=(e.reason or "")[:20])
@@ -210,14 +225,10 @@ def run_evaluation(
     # Step 4: Build pipeline and justify
     logger.info("-" * 60)
     logger.info("Step 4: Building pipeline and generating justifications")
-    pipeline = create_graph(
-        classifier=ml_classifier,
-        justifier=justifier,
-    )
-
     classifications, errors, total_tokens = classify_batch(
         test_df=validation_df,
-        pipeline=pipeline,
+        classifier=ml_classifier,
+        justifier=justifier,
         show_progress=True,
     )
 
