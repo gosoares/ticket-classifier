@@ -9,14 +9,11 @@ Sistema de classificação automática de tickets de suporte de TI utilizando RA
 
 O sistema classifica tickets em 8 categorias e fornece uma justificativa explicando o motivo da classificação.
 
-## Notebook
+## Notebooks
 
-O arquivo `notebook.ipynb` contém a documentação completa da solução, incluindo:
-
-- Análise exploratória do dataset
-- Justificativa da abordagem escolhida
-- Implementação passo a passo
-- Avaliação com métricas e visualizações
+- `notebooks/analysis.ipynb`: análise exploratória (EDA).
+- `notebooks/classificators.ipynb`: testes de classificadores (TF-IDF, embeddings, RAG) com métricas no conjunto de teste.
+- `notebooks/main.ipynb`: visão geral, prompts, pipeline e avaliação final (usa o classificador escolhido: **TF-IDF + LinearSVC**).
 
 ## Requisitos
 
@@ -107,7 +104,7 @@ uv run python main.py --reasoning ""
 
 ```bash
 uv run jupyter notebook
-# Abrir notebook.ipynb
+# Abrir notebooks/main.ipynb (ou analysis/classificators conforme a necessidade)
 ```
 
 ## Output

@@ -12,7 +12,7 @@ from classifier.config import (
     K_SIMILAR,
     RANDOM_STATE,
     REASONING_EFFORT,
-    TEST_SIZE,
+    VALIDATION_SIZE,
 )
 from classifier.conclusion import (
     build_conclusion_payload,
@@ -140,7 +140,7 @@ def classify_batch(
 def run_evaluation(
     dataset_path: str | Path = "dataset.csv",
     output_dir: str | Path = "output",
-    test_size: int = TEST_SIZE,
+    test_size: int = VALIDATION_SIZE,
     k_similar: int = K_SIMILAR,
     random_state: int = RANDOM_STATE,
     model: str | None = None,

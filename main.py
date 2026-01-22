@@ -4,7 +4,7 @@
 import argparse
 import sys
 
-from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, TEST_SIZE
+from classifier.config import K_SIMILAR, RANDOM_STATE, REASONING_EFFORT, VALIDATION_SIZE
 from classifier.runner import run_evaluation
 
 
@@ -32,8 +32,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--test-size",
         type=int,
-        default=TEST_SIZE,
-        help="Number of test samples (divided equally among classes)",
+        default=VALIDATION_SIZE,
+        help="Number of validation samples (divided equally among classes)",
     )
 
     parser.add_argument(

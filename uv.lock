@@ -2301,6 +2301,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "sentence-transformers" },
     { name = "tiktoken" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -2317,6 +2318,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "sentence-transformers", specifier = ">=5.2.0" },
     { name = "tiktoken", specifier = ">=0.12.0" },
+    { name = "tqdm", specifier = ">=4.67.1" },
 ]
 
 [[package]]
