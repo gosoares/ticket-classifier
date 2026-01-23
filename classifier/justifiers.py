@@ -59,6 +59,14 @@ class LinearJustifier:
         self.name = "Linear evidence (TF-IDF weights)"
         self._feature_names: list[str] | None = None
         self._class_to_index: dict[str, int] | None = None
+        self._word_feature_prefix: str | None = None
+
+    def _infer_word_prefix(self) -> str:
+        if self._feature_names is None:
+            return ""
+        if any(name.startswith("word__") for name in self._feature_names):
+            return "word__"
+        return ""
 
     def _top_terms(
         self,
@@ -66,13 +74,17 @@ class LinearJustifier:
         predicted_class: str,
         *,
         top_k: int,
-        feature_prefix: str = "word__",
+        feature_prefix: str | None = None,
         require_positive: bool = True,
     ) -> list[str]:
         if self._feature_names is None:
             self._feature_names = list(self.features.get_feature_names_out())
+        if self._word_feature_prefix is None:
+            self._word_feature_prefix = self._infer_word_prefix()
         if self._class_to_index is None:
             self._class_to_index = {str(c): i for i, c in enumerate(self.classes)}
+        if feature_prefix is None:
+            feature_prefix = self._word_feature_prefix
 
         class_index = self._class_to_index.get(str(predicted_class))
         if class_index is None:
@@ -117,7 +129,6 @@ class LinearJustifier:
             ticket,
             predicted_class,
             top_k=self.top_k,
-            feature_prefix="word__",
             require_positive=True,
         )
         evidence_terms = terms[: self.top_k]

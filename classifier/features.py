@@ -7,11 +7,12 @@ from sklearn.pipeline import FeatureUnion
 
 
 class TfidfFeatureExtractor:
-    """Reusable TF-IDF feature extractor (word + char)."""
+    """Reusable TF-IDF feature extractor (word n-grams by default)."""
 
     def __init__(
         self,
         *,
+        use_char_ngrams: bool = False,
         word_ngram_range: tuple[int, int] = (1, 2),
         char_ngram_range: tuple[int, int] = (3, 5),
         min_df: int = 2,
@@ -25,14 +26,17 @@ class TfidfFeatureExtractor:
             max_features=max_word_features,
             strip_accents="unicode",
         )
-        char_tfidf = TfidfVectorizer(
-            analyzer="char_wb",
-            ngram_range=char_ngram_range,
-            min_df=min_df,
-            max_features=max_char_features,
-            strip_accents="unicode",
-        )
-        self.vectorizer = FeatureUnion([("word", word_tfidf), ("char", char_tfidf)])
+        if use_char_ngrams:
+            char_tfidf = TfidfVectorizer(
+                analyzer="char_wb",
+                ngram_range=char_ngram_range,
+                min_df=min_df,
+                max_features=max_char_features,
+                strip_accents="unicode",
+            )
+            self.vectorizer = FeatureUnion([("word", word_tfidf), ("char", char_tfidf)])
+        else:
+            self.vectorizer = word_tfidf
 
     def fit(self, texts: list[str]) -> None:
         self.vectorizer.fit(texts)

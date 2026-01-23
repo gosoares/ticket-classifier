@@ -37,7 +37,7 @@ Principais arquivos em `classifier/`:
 |---------|------------------|
 | `config.py` | Configurações globais (K_SIMILAR, VALIDATION_SIZE, RANDOM_STATE, etc.) |
 | `data.py` | Carregamento do dataset + split treino/teste/validação (balanceada) |
-| `features.py` | Extração de features TF-IDF (word + char n-grams) |
+| `features.py` | Extração de features TF-IDF (word n-grams; char n-grams opcional) |
 | `classifiers.py` | Candidatos de classificação (TF-IDF, embeddings, RAG-vote, etc.) |
 | `rag.py` | Embeddings (sentence-transformers) + retriever (similaridade cosseno) |
 | `justifiers.py` | Estratégias de justificativa (linear evidence ou LLM+RAG) |
