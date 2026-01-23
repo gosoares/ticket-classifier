@@ -176,7 +176,9 @@ Artefatos gerados em `artifacts/`:
 |---------|----------|
 | `model.joblib` | Modelo treinado (TF-IDF + LinearSVC) |
 | `metadata.json` | Metadados do treino |
-| `rag/` | Embeddings + tickets para retrieval (quando `--build-rag-index`) |
+| `rag/` | Embeddings + tickets para retrieval |
+
+Se quiser um modelo pre-treinado, baixe [neste link](https://dhauzcom-my.sharepoint.com/:u:/g/personal/gabriel_soares_dhauz_com/IQCTWAU74JizQaXUMPVGf0yAASsL_2KO7kE8G3DNxjqEyJs?e=f7kghf).
 
 ## Dataset
 
