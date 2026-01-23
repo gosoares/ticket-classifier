@@ -24,6 +24,7 @@ from classifier.config import (
     REASONING_EFFORT,
     VALIDATION_SIZE,
 )
+from classifier.features import preprocess_text
 from classifier.graph import GraphRuntime, build_eval_graph
 from classifier.justifiers import LinearJustifier, LlmJustifier
 from classifier.llm import LlmClient
@@ -46,9 +47,17 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     train_parser.add_argument("dataset", type=str, help="Path to the CSV dataset file")
-    train_parser.add_argument("--output", type=str, default="output", help="Directory for output files (logs, reports)")
     train_parser.add_argument(
-        "--artifacts-dir", type=str, default="artifacts", help="Directory to save trained artifacts"
+        "--output",
+        type=str,
+        default="output",
+        help="Directory for output files (logs, reports)",
+    )
+    train_parser.add_argument(
+        "--artifacts-dir",
+        type=str,
+        default="artifacts",
+        help="Directory to save trained artifacts",
     )
     train_parser.add_argument(
         "--test-size",
@@ -57,7 +66,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of validation samples (divided equally among classes)",
     )
     train_parser.add_argument(
-        "--random-state", type=int, default=RANDOM_STATE, help="Random seed for reproducibility"
+        "--random-state",
+        type=int,
+        default=RANDOM_STATE,
+        help="Random seed for reproducibility",
     )
     train_parser.add_argument(
         "--with-justifications",
@@ -102,9 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Evaluate a single ticket and return JSON output",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    eval_parser.add_argument("ticket", nargs="?", help="Ticket text (omit to read from stdin)")
     eval_parser.add_argument(
-        "--artifacts-dir", type=str, default="artifacts", help="Directory with trained artifacts"
+        "ticket", nargs="?", help="Ticket text (omit to read from stdin)"
+    )
+    eval_parser.add_argument(
+        "--artifacts-dir",
+        type=str,
+        default="artifacts",
+        help="Directory with trained artifacts",
     )
     eval_parser.add_argument(
         "--justification",
@@ -224,7 +241,7 @@ def main() -> int:
         return 0
 
     if args.command == "eval":
-        ticket = _load_ticket(args.ticket)
+        ticket = preprocess_text(_load_ticket(args.ticket))
         if not ticket:
             print("Error: ticket text is required (arg or stdin).", file=sys.stderr)
             return 2

@@ -2,8 +2,47 @@
 
 from __future__ import annotations
 
+import re
+import unicodedata
+from string import punctuation
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import FeatureUnion
+
+
+def preprocess_text(text: str) -> str:
+    """
+    Normalize text to match dataset format.
+
+    Applies:
+    - Lowercase
+    - Remove accents (NFD decomposition)
+    - Remove punctuation
+    - Normalize whitespace
+
+    Args:
+        text: Input text to normalize
+
+    Returns:
+        Normalized text
+    """
+    if not text:
+        return text
+
+    # 1. Lowercase
+    text = text.lower()
+
+    # 2. Remove accents (NFD decomposition + remove non-ASCII marks)
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+    # 3. Remove punctuation
+    text = text.translate(str.maketrans("", "", punctuation))
+
+    # 4. Normalize whitespace (collapse multiple spaces, strip)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 
 class TfidfFeatureExtractor:
@@ -24,7 +63,7 @@ class TfidfFeatureExtractor:
             ngram_range=word_ngram_range,
             min_df=min_df,
             max_features=max_word_features,
-            strip_accents="unicode",
+            strip_accents=None,
         )
         if use_char_ngrams:
             char_tfidf = TfidfVectorizer(
@@ -32,7 +71,7 @@ class TfidfFeatureExtractor:
                 ngram_range=char_ngram_range,
                 min_df=min_df,
                 max_features=max_char_features,
-                strip_accents="unicode",
+                strip_accents=None,
             )
             self.vectorizer = FeatureUnion([("word", word_tfidf), ("char", char_tfidf)])
         else:

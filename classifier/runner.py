@@ -15,7 +15,7 @@ from classifier.config import (
     REASONING_EFFORT,
     VALIDATION_SIZE,
 )
-from classifier.features import TfidfFeatureExtractor
+from classifier.features import TfidfFeatureExtractor, preprocess_text
 from classifier.justifiers import JustificationError, LinearJustifier, LlmJustifier
 from classifier.conclusion import (
     build_conclusion_payload,
@@ -63,7 +63,7 @@ def classify_batch(
     )
 
     for _, row in pbar:
-        ticket_text = row["Document"]
+        ticket_text = preprocess_text(row["Document"])
         true_label = row["Topic_group"]
 
         try:
@@ -131,7 +131,7 @@ def classify_batch_no_justification(
     classifications: list[dict] = []
     errors: list[dict] = []
 
-    texts = test_df["Document"].tolist()
+    texts = [preprocess_text(t) for t in test_df["Document"].tolist()]
     true_labels = test_df["Topic_group"].tolist()
 
     try:
