@@ -117,6 +117,18 @@ O CLI possui **dois comandos principais**:
 - `train`: treina o modelo, calcula métricas na validação e salva os artefatos em `artifacts/` para reutilização.
 - `eval`: carrega os artefatos salvos e retorna a classificação e justificativa de **um** ticket.
 
+### Via UI (Streamlit)
+
+A interface gráfica permite colar um ticket, escolher o modo de justificativa (`linear`/`llm`) e ver o resultado e detalhes.
+
+Pré-requisito: ter artefatos em `artifacts/` (se não existir, treine antes com `uv run train dataset.csv`).
+
+```bash
+uv run ui
+```
+
+![Streamlit UI](ui.png)
+
 ### Via CLI
 
 ```bash

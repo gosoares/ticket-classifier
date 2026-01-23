@@ -7,7 +7,6 @@ from typing import Protocol
 
 import numpy as np
 import pandas as pd
-from sentence_transformers import SentenceTransformer
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.svm import LinearSVC
 
@@ -115,9 +114,12 @@ class EmbeddingClassifier:
     def __init__(self, classifier) -> None:
         self.classifier = classifier
         self.name = f"Embeddings + {classifier.__class__.__name__}"
-        self.embedding_model: SentenceTransformer | None = None
+        self.embedding_model = None
 
     def fit(self, train_df: pd.DataFrame) -> None:
+        # Local import keeps TF-IDF-only usage lightweight (no torch import).
+        from sentence_transformers import SentenceTransformer
+
         self.embedding_model = SentenceTransformer(EMBEDDING_MODEL)
         train_embeddings = self._embed_texts(
             train_df["Document"].tolist(),
@@ -134,12 +136,15 @@ class EmbeddingClassifier:
     def _embed_texts(
         self,
         texts: list[str],
-        model: SentenceTransformer | None = None,
+        model=None,
         model_name: str = EMBEDDING_MODEL,
         normalize: bool = True,
     ) -> np.ndarray:
         """Compute sentence embeddings for a list of texts."""
         if model is None:
+            # Local import keeps TF-IDF-only usage lightweight (no torch import).
+            from sentence_transformers import SentenceTransformer
+
             model = SentenceTransformer(model_name)
         embeddings = model.encode(texts, convert_to_numpy=True, show_progress_bar=True)
         if normalize:

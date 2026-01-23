@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "scikit-learn>=1.8.0",
     "sentence-transformers>=5.2.0",
+    "streamlit>=1.53.1",
     "tiktoken>=0.12.0",
     "tqdm>=4.67.1",
 ]
@@ -30,6 +31,7 @@ packages = ["classifier"]
 [project.scripts]
 train = "main:train_cli"
 eval = "main:eval_cli"
+ui = "classifier.ui:main"
 
 [tool.uv]
 package = true

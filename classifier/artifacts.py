@@ -10,7 +10,6 @@ from typing import Any
 import joblib
 
 from classifier.classifiers import TfidfClassifier
-from classifier.rag import TicketRetriever
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +61,15 @@ def load_metadata(artifacts_dir: str | Path) -> ModelMetadata:
 
 
 def save_rag_index(
-    retriever: TicketRetriever,
+    retriever,
     artifacts_dir: str | Path,
 ) -> Path:
     """Persist RAG embeddings + tickets."""
+    # Local import to avoid pulling in sentence-transformers/torch unless needed.
+    from classifier.rag import TicketRetriever
+
+    if not isinstance(retriever, TicketRetriever):
+        raise TypeError("retriever must be a TicketRetriever")
     rag_path = Path(artifacts_dir) / "rag"
     rag_path.mkdir(parents=True, exist_ok=True)
     retriever.save_index(rag_path)
@@ -74,8 +78,11 @@ def save_rag_index(
 
 def load_rag_index(
     artifacts_dir: str | Path,
-) -> TicketRetriever:
+) -> "TicketRetriever":
     """Load RAG embeddings + tickets from artifacts."""
+    # Local import to avoid pulling in sentence-transformers/torch unless needed.
+    from classifier.rag import TicketRetriever
+
     rag_path = Path(artifacts_dir) / "rag"
     meta_path = rag_path / "meta.json"
     model_name = None
