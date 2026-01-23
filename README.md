@@ -29,6 +29,27 @@ graph LR;
 - `notebooks/classificators.ipynb`: testes de classificadores (TF-IDF, embeddings, RAG) com métricas no conjunto de teste.
 - `notebooks/main.ipynb`: visão geral, prompts, pipeline e avaliação final (usa o classificador escolhido: **TF-IDF + LinearSVC**).
 
+## Módulos Python
+
+Principais arquivos em `classifier/`:
+
+| Arquivo | Responsabilidade |
+|---------|------------------|
+| `config.py` | Configurações globais (K_SIMILAR, VALIDATION_SIZE, RANDOM_STATE, etc.) |
+| `data.py` | Carregamento do dataset + split treino/teste/validação (balanceada) |
+| `features.py` | Extração de features TF-IDF (word + char n-grams) |
+| `classifiers.py` | Candidatos de classificação (TF-IDF, embeddings, RAG-vote, etc.) |
+| `rag.py` | Embeddings (sentence-transformers) + retriever (similaridade cosseno) |
+| `justifiers.py` | Estratégias de justificativa (linear evidence ou LLM+RAG) |
+| `llm.py` | Client OpenAI-compatible + prompts + gerador de conclusões |
+| `conclusion.py` | Payload de conclusão + prompts (opcional, LLM-only) |
+| `metrics.py` | Métricas de avaliação (accuracy, F1, Cohen's Kappa, MCC, matriz de confusão) |
+| `runner.py` | Orquestração do pipeline (train → classify → justify → evaluate → save) |
+| `graph.py` | LangGraph: definição do grafo de estados e nós do pipeline |
+| `artifacts.py` | Persistência de modelos, metadata e índice RAG |
+| `schemas.py` | Esquemas compartilhados (JustificationResult, TokenUsage, etc.) |
+| `logging_config.py` | Configuração de logging (terminal + arquivo) |
+
 ## Requisitos
 
 - Python 3.13+
