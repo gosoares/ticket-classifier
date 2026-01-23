@@ -1,8 +1,11 @@
 """RAG (Retrieval Augmented Generation) module for ticket retrieval/evidence."""
 
+import json
+from collections import defaultdict
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from collections import defaultdict
 from sentence_transformers import SentenceTransformer
 
 from classifier.config import EMBEDDING_MODEL
@@ -16,6 +19,7 @@ class TicketRetriever:
 
     def __init__(self, model_name: str = EMBEDDING_MODEL):
         logger.debug(f"Initializing TicketRetriever with model: {model_name}")
+        self.model_name = model_name
         self.model = SentenceTransformer(model_name)
         self.embeddings: np.ndarray | None = None
         self.tickets: pd.DataFrame | None = None
@@ -260,3 +264,47 @@ class TicketRetriever:
 
         logger.info(f"Computed representatives for {len(representatives)} classes")
         return representatives
+
+    def save_index(self, path: str | Path) -> None:
+        """
+        Persist embeddings + tickets for later retrieval.
+
+        Args:
+            path: Directory to store embeddings and tickets
+        """
+        if self.embeddings is None or self.tickets is None:
+            raise ValueError("Index not built. Call index() first.")
+
+        output_path = Path(path)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        embeddings_path = output_path / "embeddings.npy"
+        tickets_path = output_path / "tickets.csv.gz"
+        meta_path = output_path / "meta.json"
+
+        np.save(embeddings_path, self.embeddings)
+        self.tickets.to_csv(tickets_path, index=False, compression="gzip")
+        meta_path.write_text(
+            json.dumps({"embedding_model": self.model_name}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load_index(
+        cls, path: str | Path, model_name: str | None = None
+    ) -> "TicketRetriever":
+        """
+        Load embeddings + tickets from disk.
+
+        Args:
+            path: Directory with embeddings and tickets
+            model_name: SentenceTransformer model name
+        """
+        input_path = Path(path)
+        embeddings_path = input_path / "embeddings.npy"
+        tickets_path = input_path / "tickets.csv.gz"
+
+        retriever = cls(model_name=model_name or EMBEDDING_MODEL)
+        retriever.embeddings = np.load(embeddings_path)
+        retriever.tickets = pd.read_csv(tickets_path)
+        return retriever

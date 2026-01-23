@@ -12,6 +12,17 @@ Sistema de classificação automática de tickets de suporte de TI com ML (TF-ID
 
 O sistema classifica tickets em 8 categorias e fornece uma justificativa explicando o motivo da classificação.
 
+## Pipeline (LangGraph)
+
+```mermaid
+graph LR;
+  T[Ticket] --> V[vectorize - TF-IDF];
+  V --> C[classify - LinearSVC];
+  C --> R[retrieve - RAG];
+  R --> J[justify - LLM or linear];
+  J --> O[output - classe e justificativa];
+```
+
 ## Notebooks
 
 - `notebooks/analysis.ipynb`: análise exploratória (EDA).
@@ -80,40 +91,67 @@ LLM_MODEL=gpt-4o-mini
 
 ## Uso
 
+O CLI possui **dois comandos principais**:
+
+- `train`: treina o modelo, calcula métricas na validação e salva os artefatos em `artifacts/` para reutilização.
+- `eval`: carrega os artefatos salvos e retorna a classificação e justificativa de **um** ticket.
+
 ### Via CLI
 
 ```bash
-# Execução padrão (justificativa linear, sem LLM)
-uv run python main.py
+# Treinar modelo e avaliar classificação (sem justificativas por padrão)
+uv run train dataset.csv
 
 # Ver todas as opções
-uv run python main.py --help
+uv run train --help
 
-# Execução com parâmetros customizados
-uv run python main.py -v --test-size 200 --k-similar 5
+# Treinar com avaliação e justificativas lineares
+uv run train dataset.csv --with-justifications --justification linear
 
-# Usar LLM para justificativa (requer .env configurado)
-uv run python main.py --justification llm
+# Treinar com LLM (salva índice RAG automaticamente)
+uv run train dataset.csv --with-justifications --justification llm
 
-# Override do modelo LLM (opcional)
-uv run python main.py --justification llm --model "gpt-4o-mini"
+# Avaliar um ticket (saída JSON do desafio)
+uv run eval "Meu laptop não liga"
+
+# Avaliar lendo do stdin
+cat ticket.txt | uv run eval
+
+# Avaliar com LLM (requer índice RAG salvo e .env configurado)
+uv run eval --llm "Preciso de acesso ao sistema"
 ```
 
-**Opções CLI:**
+**Opções CLI (train):**
 
 | Opção | Descrição | Default |
 |-------|-----------|---------|
-| `--dataset` | Caminho do CSV | `dataset.csv` |
+| `dataset` | Caminho do CSV (posicional) | obrigatório |
 | `--output` | Diretório de saída | `output` |
+| `--artifacts-dir` | Diretório de artefatos treinados | `artifacts` |
 | `--test-size` | Número de tickets de validação (balanceado) | `200` |
-| `--k-similar` | Tickets similares no RAG | `5` |
+| `--with-justifications` | Gera justificativas na avaliação | `False` |
 | `--justification` | Método de justificativa (`linear`/`llm`) | `linear` |
+| `--llm` | Força justificativa por LLM | `False` |
+| `--k-similar` | Tickets similares no RAG | `5` |
 | `--model` | Override do modelo LLM | env var |
 | `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | env var |
 | `-v, --verbose` | Logs detalhados no terminal | `False` |
 
-Observação: apesar do nome `--test-size`, o pipeline atual separa o dataset em **treino/teste/validação** e usa o conjunto
-de **validação** (balanceado) para a avaliação final e geração de justificativas.
+**Opções CLI (eval):**
+
+| Opção | Descrição | Default |
+|-------|-----------|---------|
+| `ticket` | Texto do ticket (ou stdin) | obrigatório |
+| `--artifacts-dir` | Diretório de artefatos treinados | `artifacts` |
+| `--justification` | Método de justificativa (`linear`/`llm`) | `linear` |
+| `--k-similar` | Tickets similares no RAG | `5` |
+| `--model` | Override do modelo LLM | env var |
+| `--reasoning` | Nível de reasoning (`low`/`medium`/`high`) | env var |
+| `-v, --verbose` | Logs detalhados no terminal | `False` |
+
+Observações:
+- `train` sempre calcula métricas no conjunto de validação balanceado.
+- `eval` imprime **apenas** o JSON exigido pelo desafio em stdout.
 
 ### Via Notebook
 
@@ -128,9 +166,17 @@ Arquivos gerados em `output/`:
 
 | Arquivo | Conteúdo |
 |---------|----------|
-| `classifications.json` | Report detalhado com `classifications` (inclui `classe` e `justification`) e metadados |
+| `classifications.json` | Report detalhado com `classifications` (inclui `classe` e `justificativa` quando habilitado) |
 | `metrics.json` | Métricas no conjunto de validação |
 | `run.log` | Log de execução |
+
+Artefatos gerados em `artifacts/`:
+
+| Arquivo | Conteúdo |
+|---------|----------|
+| `model.joblib` | Modelo treinado (TF-IDF + LinearSVC) |
+| `metadata.json` | Metadados do treino |
+| `rag/` | Embeddings + tickets para retrieval (quando `--build-rag-index`) |
 
 ## Dataset
 

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "jupyter>=1.1.1",
+    "langgraph>=1.0.7",
     "notebook>=7.5.2",
     "numpy>=2.4.1",
     "openai>=2.15.0",
@@ -21,6 +22,14 @@ dependencies = [
 
 [tool.setuptools]
 packages = ["classifier"]
+py-modules = ["main"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["classifier"]
+
+[project.scripts]
+train = "main:train_cli"
+eval = "main:eval_cli"
+
+[tool.uv]
+package = true

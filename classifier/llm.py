@@ -14,6 +14,7 @@ from classifier.schemas import TokenUsage
 load_dotenv()
 
 LLM_MODEL = os.environ.get("LLM_MODEL")
+LLM_TIMEOUT = os.environ.get("LLM_TIMEOUT")
 
 logger = get_logger("llm")
 
@@ -130,16 +131,23 @@ class LlmClient:
         api_key: str | None = None,
         base_url: str | None = None,
         seed: int | None = None,
+        timeout: float | None = None,
     ):
         resolved_model = model or LLM_MODEL
         if not resolved_model:
             raise ValueError("LLM_MODEL must be set via parameter or LLM_MODEL env var")
         self.model = resolved_model
         self.seed = seed
+        resolved_timeout = timeout
+        if resolved_timeout is None and LLM_TIMEOUT:
+            try:
+                resolved_timeout = float(LLM_TIMEOUT)
+            except ValueError:
+                resolved_timeout = None
         self.client = OpenAI(
             base_url=base_url or os.environ.get("LLM_BASE_URL"),
             api_key=api_key or os.environ.get("LLM_API_KEY"),
-            timeout=20.0,
+            timeout=resolved_timeout or 60.0,
         )
 
     def chat(

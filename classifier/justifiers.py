@@ -38,6 +38,7 @@ class Justifier(Protocol):
         self,
         ticket: str,
         predicted_class: str,
+        similar_tickets: list[dict] | None = None,
     ) -> JustificationDetails: ...
 
 
@@ -110,6 +111,7 @@ class LinearJustifier:
         self,
         ticket: str,
         predicted_class: str,
+        similar_tickets: list[dict] | None = None,
     ) -> JustificationDetails:
         terms = self._top_terms(
             ticket,
@@ -166,8 +168,13 @@ class LlmJustifier:
         self,
         ticket: str,
         predicted_class: str,
+        similar_tickets: list[dict] | None = None,
     ) -> JustificationDetails:
-        similar_tickets = self.retriever.retrieve(ticket, k=self.k_similar)
+        similar_tickets = (
+            similar_tickets
+            if similar_tickets is not None
+            else self.retriever.retrieve(ticket, k=self.k_similar)
+        )
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(ticket, predicted_class, similar_tickets)
 

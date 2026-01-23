@@ -122,6 +122,53 @@ def classify_batch(
     return classifications, errors, total_tokens
 
 
+def classify_batch_no_justification(
+    test_df: pd.DataFrame,
+    classifier,
+    show_progress: bool = True,
+) -> tuple[list[dict], list[dict]]:
+    """Generate predicted classes without justifications."""
+    classifications: list[dict] = []
+    errors: list[dict] = []
+
+    texts = test_df["Document"].tolist()
+    true_labels = test_df["Topic_group"].tolist()
+
+    try:
+        preds = classifier.predict(texts)
+    except Exception as exc:
+        return [], [{"reason": str(exc)}]
+
+    pbar = tqdm(
+        zip(texts, true_labels, preds),
+        total=len(texts),
+        desc="Classifying",
+        disable=not show_progress,
+    )
+
+    for ticket_text, true_label, predicted_label in pbar:
+        is_correct = true_label == predicted_label
+        if show_progress:
+            pbar.set_postfix(pred=predicted_label, ok=is_correct)
+
+        classifications.append(
+            {
+                "ticket": ticket_text,
+                "true_class": true_label,
+                "predicted_class": predicted_label,
+                "classe": predicted_label,
+                "justificativa": None,
+                "justification": None,
+                "justification_source": "none",
+                "evidence_terms": None,
+                "reasoning": None,
+                "correct": is_correct,
+            }
+        )
+
+    return classifications, errors
+
+
 def run_evaluation(
     dataset_path: str | Path = "dataset.csv",
     output_dir: str | Path = "output",
@@ -132,6 +179,7 @@ def run_evaluation(
     verbose: bool = False,
     reasoning_effort: str | None = REASONING_EFFORT,
     justification: str = JUSTIFICATION,
+    with_justifications: bool = True,
 ) -> dict:
     """
     Execute the full evaluation pipeline.
@@ -139,8 +187,8 @@ def run_evaluation(
     Steps:
     1. Load dataset and split into train/test/validation
     2. Train ML classifier
-    3. Configure justifier (linear by default, LLM optional)
-    4. Build pipeline and generate justifications
+    3. Configure justifier (optional)
+    4. Generate justifications (optional)
     5. Calculate evaluation metrics
     6. Save results to output files
 
@@ -154,6 +202,7 @@ def run_evaluation(
         verbose: Enable verbose logging to terminal
         reasoning_effort: Reasoning effort level (low/medium/high) or None
         justification: Justification method ("linear" or "llm")
+        with_justifications: Whether to generate justifications during evaluation
 
     Returns:
         Dict with metrics and output file paths
@@ -176,6 +225,7 @@ def run_evaluation(
     logger.info(f"Reasoning effort: {reasoning_effort}")
     logger.info(f"Random state: {random_state}")
     logger.info(f"Justification: {justification}")
+    logger.info(f"With justifications: {with_justifications}")
 
     # Step 1: Load and split data
     logger.info("-" * 60)
@@ -198,39 +248,52 @@ def run_evaluation(
     ml_classifier.fit(train_df)
     logger.info("ML classifier trained")
 
-    # Step 3: Configure justifier
+    # Step 3: Configure justifier (optional)
     logger.info("-" * 60)
     llm_client = None
-    if justification == "linear":
-        logger.info("Step 3: Using linear justifications (default)")
-        justifier = LinearJustifier(
-            ml_classifier.classifier.coef_,
-            ml_classifier.classifier.classes_,
-            features,
-        )
-    elif justification == "llm":
-        logger.info("Step 3: Using LLM justifications with RAG (optional)")
-        retriever = TicketRetriever()
-        retriever.index(train_df)
-        llm_client = LlmClient(model=model, seed=random_state)
-        justifier = LlmJustifier(
-            llm_client,
-            retriever,
-            k_similar=k_similar,
-            reasoning_effort=reasoning_effort,
+    classifications = []
+    errors = []
+    total_tokens = TokenUsage()
+    if with_justifications:
+        if justification == "linear":
+            logger.info("Step 3: Using linear justifications (default)")
+            justifier = LinearJustifier(
+                ml_classifier.classifier.coef_,
+                ml_classifier.classifier.classes_,
+                features,
+            )
+        elif justification == "llm":
+            logger.info("Step 3: Using LLM justifications with RAG (optional)")
+            retriever = TicketRetriever()
+            retriever.index(train_df)
+            llm_client = LlmClient(model=model, seed=random_state)
+            justifier = LlmJustifier(
+                llm_client,
+                retriever,
+                k_similar=k_similar,
+                reasoning_effort=reasoning_effort,
+            )
+        else:
+            raise ValueError("justification must be 'linear' or 'llm'")
+
+        # Step 4: Build pipeline and justify
+        logger.info("-" * 60)
+        logger.info("Step 4: Building pipeline and generating justifications")
+        classifications, errors, total_tokens = classify_batch(
+            test_df=validation_df,
+            classifier=ml_classifier,
+            justifier=justifier,
+            show_progress=True,
         )
     else:
-        raise ValueError("justification must be 'linear' or 'llm'")
-
-    # Step 4: Build pipeline and justify
-    logger.info("-" * 60)
-    logger.info("Step 4: Building pipeline and generating justifications")
-    classifications, errors, total_tokens = classify_batch(
-        test_df=validation_df,
-        classifier=ml_classifier,
-        justifier=justifier,
-        show_progress=True,
-    )
+        logger.info("Step 3: Skipping justifications (classification only)")
+        logger.info("-" * 60)
+        logger.info("Step 4: Running classification only")
+        classifications, errors = classify_batch_no_justification(
+            test_df=validation_df,
+            classifier=ml_classifier,
+            show_progress=True,
+        )
 
     # Extract y_true and y_pred from classifications for metrics
     y_true = [c["true_class"] for c in classifications]
@@ -269,6 +332,7 @@ def run_evaluation(
             "reasoning_effort": reasoning_effort,
             "random_state": random_state,
             "justification": justification,
+            "with_justifications": with_justifications,
         },
         "summary": {
             "total": len(validation_df),
@@ -412,6 +476,10 @@ def run_evaluation(
     logger.info(f"Results saved to: {output_path}")
 
     return {
+        "classifier": ml_classifier,
+        "train_df": train_df,
+        "validation_df": validation_df,
+        "classes": classes,
         "metrics": metrics,
         "classifications_path": str(classifications_path),
         "metrics_path": str(metrics_path),

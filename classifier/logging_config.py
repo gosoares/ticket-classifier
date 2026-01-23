@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from typing import TextIO
 from pathlib import Path
 
 
@@ -9,6 +10,7 @@ def setup_logging(
     output_dir: str | Path = "output",
     verbose: bool = False,
     log_filename: str = "run.log",
+    console_stream: TextIO = sys.stdout,
 ) -> logging.Logger:
     """
     Configure logging for both terminal and file output.
@@ -38,7 +40,7 @@ def setup_logging(
     )
 
     # Terminal handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(logging.DEBUG if verbose else logging.INFO)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
